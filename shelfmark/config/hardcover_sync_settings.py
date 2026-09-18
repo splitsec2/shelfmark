@@ -55,7 +55,7 @@ def _test_library_connection(current_values: dict[str, Any] | None = None) -> di
     """Action-button callback: verify Audiobookshelf connectivity + item count."""
     from shelfmark.core import library_index
 
-    return library_index.test_connection()
+    return library_index.test_connection("audiobookshelf")
 
 
 def _sync_now(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
