@@ -233,6 +233,15 @@ _warn_if_local_admin_missing()
 # Start download coordinator
 backend.start()
 
+# Start the Hardcover wishlist sync + auto-download scheduler (in-process daemon).
+if user_db is not None:
+    try:
+        from shelfmark.core import hardcover_scheduler
+
+        hardcover_scheduler.start(user_db, backend.queue_release, _user_db_path)
+    except (ImportError, RuntimeError, OSError) as exc:
+        logger.warning("Failed to start Hardcover scheduler: %s", exc)
+
 # Pre-solve the direct-download source's protection challenge in the background so the
 # first user search does not pay for a cold Chrome bypass. Never blocks startup.
 warmup.start()
