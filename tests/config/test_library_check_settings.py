@@ -74,8 +74,9 @@ def test_action_buttons_delegate_to_the_library_index(
 ) -> None:
     calls: list[str] = []
 
-    def fake_test_connection(name: str) -> dict[str, Any]:
+    def fake_test_connection(name: str, current_values: dict[str, Any] | None) -> dict[str, Any]:
         calls.append(name)
+        assert current_values == {}
         return {"success": True, "message": name}
 
     monkeypatch.setattr("shelfmark.core.library_index.test_connection", fake_test_connection)
