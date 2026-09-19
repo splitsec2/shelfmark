@@ -57,7 +57,7 @@ Sequels and other near-miss titles fail the title rule; the same title by a diff
 
 ## Which Library Is Checked
 
-Requests carry a content type. Audiobook requests are checked against Audiobookshelf and ebook requests against Calibre. A library that is disabled, or that does not hold the requested content type, is not consulted — with only Calibre enabled, audiobook requests are never skipped by the check.
+Requests carry a content type. Audiobook requests are checked against Audiobookshelf and ebook requests against Calibre. With **Request as: Ebooks and audiobooks**, every shelf book yields one request of each type, so the same title can be skipped as an ebook (already in Calibre) yet requested as an audiobook, or vice versa. A library that is disabled, or that does not hold the requested content type, is not consulted — with only Calibre enabled, audiobook requests are never skipped by the check.
 
 ## If a Library Is Unreachable
 
