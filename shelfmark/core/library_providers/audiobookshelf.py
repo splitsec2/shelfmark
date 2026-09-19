@@ -7,23 +7,26 @@ empty), so each item is tokenized from title + author + folder path.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 
 from shelfmark.core.config import config as app_config
-from shelfmark.core.library_providers import LibraryEntry
+from shelfmark.core.library_providers import LibraryEntry, setting
 from shelfmark.core.text_match import isbn_variants, tokens
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _REQUEST_TIMEOUT = 15
 _ITEMS_PAGE_LIMIT = 500
 
 
-def _config() -> tuple[bool, str, str, list[str]]:
-    enabled = bool(app_config.get("LIBRARY_CHECK_ENABLED", False))
-    url = str(app_config.get("AUDIOBOOKSHELF_URL", "") or "").strip().rstrip("/")
-    token = str(app_config.get("AUDIOBOOKSHELF_TOKEN", "") or "").strip()
-    lib_ids_raw = str(app_config.get("AUDIOBOOKSHELF_LIBRARY_IDS", "") or "")
+def _config(overrides: Mapping[str, Any] | None = None) -> tuple[bool, str, str, list[str]]:
+    enabled = bool(setting(app_config, "LIBRARY_CHECK_ENABLED", False, overrides))
+    url = str(setting(app_config, "AUDIOBOOKSHELF_URL", "", overrides) or "").strip().rstrip("/")
+    token = str(setting(app_config, "AUDIOBOOKSHELF_TOKEN", "", overrides) or "").strip()
+    lib_ids_raw = str(setting(app_config, "AUDIOBOOKSHELF_LIBRARY_IDS", "", overrides) or "")
     lib_ids = [s.strip() for s in lib_ids_raw.split(",") if s.strip()]
     return enabled, url, token, lib_ids
 
@@ -107,19 +110,22 @@ class AudiobookshelfLibrary:
     display_name = "Audiobookshelf"
     content_types = frozenset({"audiobook"})
 
+    def __init__(self, overrides: Mapping[str, Any] | None = None) -> None:
+        self._overrides = overrides
+
     def is_enabled(self) -> bool:
-        enabled, url, token, _lib_ids = _config()
+        enabled, url, token, _lib_ids = _config(self._overrides)
         return enabled and bool(url) and bool(token)
 
     def describe(self) -> str:
-        _enabled, url, _token, _lib_ids = _config()
+        _enabled, url, _token, _lib_ids = _config(self._overrides)
         return f"Audiobookshelf at {url}" if url else "Audiobookshelf"
 
     def fingerprint(self) -> None:
         return None
 
     def fetch_entries(self) -> list[LibraryEntry]:
-        _enabled, url, token, lib_ids = _config()
+        _enabled, url, token, lib_ids = _config(self._overrides)
         if not url or not token:
             raise ValueError("Set the Audiobookshelf URL and token first.")
         return _fetch_library_entries(url, token, lib_ids)
