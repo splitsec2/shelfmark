@@ -329,3 +329,41 @@ def test_unsaved_form_values_override_saved_settings_for_test_connection(tmp_pat
 
     provider = CalibreLibrary({"CALIBRE_LIBRARY_DB_PATH": str(tmp_path / "form.db")})
     assert provider.describe().endswith("form.db")
+
+
+def test_ownership_reports_only_formats_with_an_enabled_library(providers):
+    owned = LibraryEntry(
+        frozenset({"dungeon", "crawler", "carl"}),
+        frozenset({"9780593820247"}),
+        frozenset(),
+        frozenset(),
+    )
+    providers.append(_Provider("calibre", {"ebook"}, [owned]))
+    providers.append(_Provider("audiobookshelf", {"audiobook"}, [], enabled=False))
+
+    assert library_index.ownership(_book(isbn_13="9780593820247")) == {"ebook": True}
+    assert library_index.ownership(_book(isbn_13="9999999999999", title="Something Else")) == {
+        "ebook": False
+    }
+
+
+def test_ownership_is_none_when_no_library_check_is_enabled(providers):
+    providers.append(_Provider("calibre", {"ebook"}, [], enabled=False))
+
+    assert library_index.ownership(_book()) is None
+
+
+def test_ownership_covers_both_formats_when_both_libraries_are_enabled(providers):
+    entry = LibraryEntry(
+        frozenset({"dungeon", "crawler", "carl"}),
+        frozenset({"9780593820247"}),
+        frozenset(),
+        frozenset(),
+    )
+    providers.append(_Provider("calibre", {"ebook"}, []))
+    providers.append(_Provider("audiobookshelf", {"audiobook"}, [entry]))
+
+    assert library_index.ownership(_book(isbn_13="9780593820247")) == {
+        "ebook": False,
+        "audiobook": True,
+    }
