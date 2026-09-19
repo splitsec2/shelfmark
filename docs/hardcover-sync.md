@@ -2,7 +2,7 @@
 
 Configure in **Settings → Hardcover Sync**.
 
-Hardcover Sync pulls books from your [Hardcover](https://hardcover.app) reading shelves into Shelfmark as requests, optionally downloads them without an admin picking a release, and can skip books you already own in Audiobookshelf. Every part is opt-in and off by default; the tab does nothing until you enable it.
+Hardcover Sync pulls books from your [Hardcover](https://hardcover.app) reading shelves into Shelfmark as requests, optionally downloads them without an admin picking a release, and can skip books you already own in Audiobookshelf or a Calibre library. Every part is opt-in and off by default; the tab does nothing until you enable it.
 
 ## Capabilities
 
@@ -14,7 +14,7 @@ A book is skipped when:
 
 - a request with the same Hardcover book id already exists, in any status
 - a download with the same title and author is already in the download history
-- the library check (below) says it is already in Audiobookshelf
+- the library check (below) says you already own it
 - a pending request with the same title, author, and content type already exists
 
 ### Automatic downloads
@@ -30,11 +30,11 @@ A release is a strict match only when all of the following hold:
 
 Among matching releases from the winning source, `m4b` outranks `mp3`, then more seeders, then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
-### Library check (Audiobookshelf)
+### Library check
 
-When enabled, both shelf sync and automatic downloads ask your Audiobookshelf server whether the book is already there, by ISBN or by fuzzy title plus author surname, and skip it if so. The library is fetched at most every 10 minutes.
+When enabled, both shelf sync and automatic downloads look the book up in the libraries you have connected — Audiobookshelf for audiobook requests, a Calibre library (Calibre-Web / Calibre-Web Automated) for ebook requests — by provider id, ISBN, or fuzzy title plus author surname, and skip it if it is already there. Each library is indexed at most every 10 minutes. Settings, mounting and the matching rules are described in [Library Check](library-check.md).
 
-The check **fails open**: if Audiobookshelf is unreachable or returns an error, Shelfmark logs a warning, reuses the last successful fetch if it has one, and otherwise treats the book as not owned so processing continues.
+The check **fails open**: if a library is unreachable or returns an error, Shelfmark logs a warning, reuses the last successful fetch if it has one, and otherwise treats the book as not owned so processing continues.
 
 ## Settings
 
@@ -53,10 +53,13 @@ The check **fails open**: if Audiobookshelf is unreachable or returns an error, 
 | `AUDIOBOOKSHELF_URL` | Audiobookshelf URL | — | Must be reachable from the Shelfmark container, e.g. `http://10.0.0.91:13378` |
 | `AUDIOBOOKSHELF_TOKEN` | Audiobookshelf API Token | — | From Audiobookshelf **Settings → Users → your user → API Token** |
 | `AUDIOBOOKSHELF_LIBRARY_IDS` | Library IDs | — | Comma-separated. Blank checks every book library |
+| `LIBRARY_CHECK_CALIBRE_ENABLED` | Skip books already in a Calibre library (Calibre-Web / CWA) | Off | Ebook requests only |
+| `CALIBRE_LIBRARY_DB_PATH` | Calibre metadata.db path | `/calibre-library/metadata.db` | Mount the library folder read-only |
 
 Two action buttons sit at the bottom of the tab:
 
 - **Test library connection** verifies the Audiobookshelf URL and token and reports how many items were indexed.
+- **Test Calibre library** reads `metadata.db` and reports how many books were indexed.
 - **Sync now** runs a sync and automatic-download pass immediately using the saved settings. Sync runs even when scheduled sync is off; automatic downloads still require their own toggle.
 
 ## Request Flow
