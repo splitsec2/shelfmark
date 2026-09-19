@@ -55,6 +55,10 @@ A book counts as owned when any of these match a library entry:
 
 Sequels and other near-miss titles fail the title rule; the same title by a different author fails the surname rule.
 
+## Badges in Search Results
+
+When a library check is enabled, search results (card, list and compact views) and the details dialog show an **Ebook** / **Audiobook** badge on books the check already finds in the matching library. Only formats with an enabled library are reported, and the badges use the same cached index as the sync, so they add no network calls per search once the index is warm.
+
 ## Which Library Is Checked
 
 Requests carry a content type. Audiobook requests are checked against Audiobookshelf and ebook requests against Calibre. With **Request as: Ebooks and audiobooks**, every shelf book yields one request of each type, so the same title can be skipped as an ebook (already in Calibre) yet requested as an audiobook, or vice versa. A library that is disabled, or that does not hold the requested content type, is not consulted — with only Calibre enabled, audiobook requests are never skipped by the check.
