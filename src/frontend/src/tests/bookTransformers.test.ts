@@ -4,6 +4,8 @@ import { isMetadataBook, type Release } from '../types/index';
 import {
   transformReleaseToDirectBook,
   transformSourceRecordToBook,
+  transformMetadataToBook,
+  type MetadataBookData,
 } from '../utils/bookTransformers';
 
 describe('bookTransformers.transformReleaseToDirectBook', () => {
@@ -82,5 +84,27 @@ describe('bookTransformers.transformSourceRecordToBook', () => {
     expect(book.source_url).toBe('https://example.com/record/md5-456');
     expect(book.info).toEqual({ Downloads: ['64'] });
     expect(isMetadataBook(book)).toBe(false);
+  });
+});
+
+describe('transformMetadataToBook', () => {
+  const metadata: MetadataBookData = {
+    provider: 'hardcover',
+    provider_id: '446681',
+    title: 'Dungeon Crawler Carl',
+    authors: ['Matt Dinniman'],
+  };
+
+  it('carries the library ownership flags through to the Book', () => {
+    const book = transformMetadataToBook({
+      ...metadata,
+      library: { ebook: true, audiobook: false },
+    });
+
+    expect(book.library).toEqual({ ebook: true, audiobook: false });
+  });
+
+  it('leaves library undefined when the API sends none', () => {
+    expect(transformMetadataToBook(metadata).library).toBeUndefined();
   });
 });
