@@ -75,6 +75,6 @@ def test_sync_now_starts_a_forced_run(monkeypatch):
 
 def test_test_library_connection_delegates_to_library_index(monkeypatch):
     expected = {"success": True, "message": "Connected. Indexed 3 library item(s)."}
-    monkeypatch.setattr("shelfmark.core.library_index.test_connection", lambda: expected)
+    monkeypatch.setattr("shelfmark.core.library_index.test_connection", lambda _name: expected)
 
     assert settings_registry.execute_action("hardcover_sync", "test_library_connection") == expected
