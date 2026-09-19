@@ -58,6 +58,13 @@ def _test_library_connection(current_values: dict[str, Any] | None = None) -> di
     return library_index.test_connection("audiobookshelf")
 
 
+def _test_calibre_library(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Action-button callback: read the Calibre database + count the books."""
+    from shelfmark.core import library_index
+
+    return library_index.test_connection("calibre")
+
+
 def _sync_now(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Action-button callback: trigger an immediate sync + auto-download pass."""
     from shelfmark.core import hardcover_scheduler
@@ -169,10 +176,11 @@ def hardcover_sync_settings() -> list[SettingsField]:
         ),
         HeadingField(
             key="library_check_heading",
-            title="Library Check (Audiobookshelf)",
+            title="Library Check",
             description=(
                 "Skip books you already own. When enabled, the sync and auto-download "
-                "steps check your Audiobookshelf library and skip anything already there."
+                "steps check your libraries and skip anything already there: "
+                "Audiobookshelf for audiobook requests, Calibre for ebook requests."
             ),
         ),
         CheckboxField(
@@ -206,6 +214,28 @@ def hardcover_sync_settings() -> list[SettingsField]:
             label="Test library connection",
             description="Check that Shelfmark can reach Audiobookshelf and count the items.",
             callback=_test_library_connection,
+        ),
+        CheckboxField(
+            key="LIBRARY_CHECK_CALIBRE_ENABLED",
+            label="Skip books already in a Calibre library (Calibre-Web / CWA)",
+            description="Check a Calibre metadata.db before adding/downloading an ebook.",
+            default=False,
+        ),
+        TextField(
+            key="CALIBRE_LIBRARY_DB_PATH",
+            label="Calibre metadata.db path",
+            description=(
+                "Path to metadata.db as seen from inside the Shelfmark container. Mount the "
+                "Calibre library folder read-only, e.g. /path/to/calibre-library:/calibre-library:ro."
+            ),
+            default="/calibre-library/metadata.db",
+            placeholder="/calibre-library/metadata.db",
+        ),
+        ActionButton(
+            key="test_calibre_library",
+            label="Test Calibre library",
+            description="Check that Shelfmark can read the Calibre database and count the books.",
+            callback=_test_calibre_library,
         ),
         ActionButton(
             key="sync_now",

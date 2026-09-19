@@ -2,9 +2,10 @@
 
 Each ``LibraryProvider`` (see ``library_providers``) indexes its library into
 ``LibraryEntry`` rows. This module caches those rows per provider, routes a lookup to
-the providers that hold the requested content type, and matches by ISBN first,
-otherwise fuzzy title-token overlap plus the author surname (``text_match``) - the
-same rule the release matcher in ``auto_download`` uses.
+the providers that hold the requested content type, and matches by identifier first
+(the book's id in the same metadata provider, ISBN in either 10 or 13 form), otherwise
+fuzzy title-token overlap plus the author surname (``text_match``) - the same rule the
+release matcher in ``auto_download`` uses.
 
 Fail-open by design: a disabled or unreachable library never stalls the pipeline.
 ``is_in_library`` answers False (or from the stale cache) and logs a warning.
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.library_providers import all_providers
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.text_match import author_surname, normalize_isbn, title_tokens_match
+from shelfmark.core.text_match import author_surname, isbn_variants, title_tokens_match
 
 if TYPE_CHECKING:
     from shelfmark.core.library_providers import LibraryEntry, LibraryProvider
@@ -90,15 +91,15 @@ def any_provider_enabled() -> bool:
 
 
 def book_matches_entries(book: BookMetadata, entries: list[LibraryEntry]) -> bool:
-    """Pure matcher: True if ``book`` matches any library entry (ISBN or fuzzy)."""
+    """Pure matcher: True if ``book`` matches any library entry (identifier or fuzzy)."""
     if not entries:
         return False
 
-    book_isbns = {normalize_isbn(book.isbn_13), normalize_isbn(book.isbn_10)} - {""}
-    if book_isbns:
-        for entry in entries:
-            if entry.isbns & book_isbns:
-                return True
+    external_id = (book.provider, str(book.provider_id)) if book.provider_id else None
+    book_isbns = isbn_variants(book.isbn_13) | isbn_variants(book.isbn_10)
+    for entry in entries:
+        if external_id in entry.external_ids or entry.isbns & book_isbns:
+            return True
 
     title = book.search_title or book.title
     surname = author_surname(book.search_author or (book.authors[0] if book.authors else ""))

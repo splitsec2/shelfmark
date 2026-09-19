@@ -43,5 +43,6 @@ class LibraryProvider(Protocol):
 def all_providers() -> list[LibraryProvider]:
     """Concrete providers, in a fixed order."""
     from shelfmark.core.library_providers.audiobookshelf import AudiobookshelfLibrary
+    from shelfmark.core.library_providers.calibre import CalibreLibrary
 
-    return [AudiobookshelfLibrary()]
+    return [AudiobookshelfLibrary(), CalibreLibrary()]
