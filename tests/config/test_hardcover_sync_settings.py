@@ -80,3 +80,13 @@ def test_test_library_connection_delegates_to_library_index(monkeypatch):
     )
 
     assert settings_registry.execute_action("hardcover_sync", "test_library_connection") == expected
+
+
+def test_request_as_offers_both_and_ebook_sources_have_their_own_priority_list():
+    fields = _field_map()
+    options = fields["HARDCOVER_SYNC_CONTENT_TYPE"].options
+    values = {o["value"] for o in (options() if callable(options) else options)}
+
+    assert values == {"audiobook", "ebook", "both"}
+    assert "AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY" in fields
+    assert fields["AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY"].default == []
