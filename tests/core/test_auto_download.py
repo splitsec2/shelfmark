@@ -349,6 +349,7 @@ class TestAutoDownloadRequest:
         row = _pending_request(user_db, reader["id"])
         _stub_provider(monkeypatch, _book())
         monkeypatch.setattr(auto_download, "app_config", _Config(LIBRARY_CHECK_ENABLED=True))
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: True
         )
