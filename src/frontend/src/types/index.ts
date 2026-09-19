@@ -14,6 +14,11 @@ export interface DisplayField {
 }
 
 // Book data types
+export interface LibraryOwnership {
+  ebook?: boolean;
+  audiobook?: boolean;
+}
+
 export interface Book {
   id: string;
   request_id?: number;
@@ -32,6 +37,7 @@ export interface Book {
   status_message?: string; // Detailed status message (e.g., "Trying Libgen (2/5)")
   added_time?: number; // Timestamp when added to queue
   content_type?: string; // "ebook", "audiobook", or related book subtype
+  library?: LibraryOwnership; // Per-format "already in your library" flags from the library check
   source?: string; // Release source handler (e.g., "direct_download", "prowlarr")
   source_display_name?: string; // Human-readable source name (e.g., "Direct Download")
   // Metadata provider fields (used in universal search mode)
