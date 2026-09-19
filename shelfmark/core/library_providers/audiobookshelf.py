@@ -13,7 +13,7 @@ import requests
 
 from shelfmark.core.config import config as app_config
 from shelfmark.core.library_providers import LibraryEntry
-from shelfmark.core.text_match import normalize_isbn, tokens
+from shelfmark.core.text_match import isbn_variants, tokens
 
 _REQUEST_TIMEOUT = 15
 _ITEMS_PAGE_LIMIT = 500
@@ -46,11 +46,10 @@ def _item_to_entry(item: dict[str, Any]) -> LibraryEntry:
 
     tok = set(tokens(title)) | set(tokens(author)) | set(tokens(rel_path))
 
-    isbns = {v for v in (normalize_isbn(meta.get("isbn")),) if v}
     asin = str(meta.get("asin") or "").strip().upper()
     asins = {asin} if asin else set()
 
-    return LibraryEntry(frozenset(tok), frozenset(isbns), frozenset(asins))
+    return LibraryEntry(frozenset(tok), isbn_variants(meta.get("isbn")), frozenset(asins))
 
 
 def _fetch_library_entries(url: str, token: str, lib_ids: list[str]) -> list[LibraryEntry]:
