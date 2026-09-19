@@ -17,11 +17,15 @@ import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config as app_config
-from shelfmark.core.library_providers import LibraryEntry
+from shelfmark.core.library_providers import LibraryEntry, setting
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.text_match import isbn_variants, tokens
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 logger = setup_logger(__name__)
 
@@ -47,9 +51,12 @@ _SERIES_SQL = "SELECT l.book, s.name FROM books_series_link l JOIN series s ON s
 _IDENTIFIERS_SQL = "SELECT book, type, val FROM identifiers"
 
 
-def _db_path() -> Path:
+def _db_path(overrides: Mapping[str, Any] | None = None) -> Path:
     return Path(
-        str(app_config.get("CALIBRE_LIBRARY_DB_PATH", _DEFAULT_DB_PATH) or _DEFAULT_DB_PATH)
+        str(
+            setting(app_config, "CALIBRE_LIBRARY_DB_PATH", _DEFAULT_DB_PATH, overrides)
+            or _DEFAULT_DB_PATH
+        )
     )
 
 
@@ -132,19 +139,22 @@ class CalibreLibrary:
     display_name = "Calibre"
     content_types = frozenset({"ebook"})
 
+    def __init__(self, overrides: Mapping[str, Any] | None = None) -> None:
+        self._overrides = overrides
+
     def is_enabled(self) -> bool:
-        return bool(app_config.get("LIBRARY_CHECK_CALIBRE_ENABLED", False))
+        return bool(setting(app_config, "LIBRARY_CHECK_CALIBRE_ENABLED", False, self._overrides))
 
     def describe(self) -> str:
-        return f"Calibre library at {_db_path()}"
+        return f"Calibre library at {_db_path(self._overrides)}"
 
     def fingerprint(self) -> float | None:
-        path = _db_path()
+        path = _db_path(self._overrides)
         candidates = (path, path.with_name(f"{path.name}-wal"))
         return max((p.stat().st_mtime for p in candidates if p.exists()), default=None)
 
     def fetch_entries(self) -> list[LibraryEntry]:
-        path = _db_path()
+        path = _db_path(self._overrides)
         if not path.is_file():
             raise FileNotFoundError(f"No Calibre database at {path}")
         with closing(_connect(path)) as conn:

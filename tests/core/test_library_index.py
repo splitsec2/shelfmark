@@ -73,7 +73,7 @@ class _Provider:
 @pytest.fixture
 def providers(monkeypatch: pytest.MonkeyPatch) -> list[_Provider]:
     registered: list[_Provider] = []
-    monkeypatch.setattr(library_index, "all_providers", lambda: list(registered))
+    monkeypatch.setattr(library_index, "all_providers", lambda overrides=None: list(registered))
     monkeypatch.setattr(library_index, "_cache", {})
     return registered
 
@@ -288,7 +288,7 @@ def test_connection_reports_the_count_and_primes_the_cache(providers: list[_Prov
     provider = _Provider("ebook", {"ebook"}, [_DCC_ENTRY, _entry("other")])
     providers.append(provider)
 
-    result = library_index.test_connection("ebook")
+    result = library_index.test_connection("ebook", None)
 
     assert result == {"success": True, "message": "Ebook (test): indexed 2 item(s)."}
     assert library_index.is_in_library(_book(), "ebook") is True
@@ -298,12 +298,34 @@ def test_connection_reports_the_count_and_primes_the_cache(providers: list[_Prov
 def test_connection_reports_provider_errors(providers: list[_Provider]) -> None:
     providers.append(_Provider("ebook", {"ebook"}, error=OSError("no such file")))
 
-    result = library_index.test_connection("ebook")
+    result = library_index.test_connection("ebook", None)
 
     assert result == {"success": False, "message": "Ebook (test): no such file"}
 
 
 def test_connection_rejects_unknown_providers(providers: list[_Provider]) -> None:
-    result = library_index.test_connection("nope")
+    result = library_index.test_connection("nope", None)
 
     assert result == {"success": False, "message": "Unknown library provider: nope"}
+
+
+def test_unsaved_form_values_override_saved_settings_for_test_connection(tmp_path):
+    from shelfmark.core.library_providers import setting
+    from shelfmark.core.library_providers.calibre import CalibreLibrary
+
+    class _Saved:
+        def get(self, key, default=None, user_id=None):
+            return {"CALIBRE_LIBRARY_DB_PATH": "/saved/metadata.db"}.get(key, default)
+
+    assert (
+        setting(_Saved(), "CALIBRE_LIBRARY_DB_PATH", "", {"CALIBRE_LIBRARY_DB_PATH": "/form/x.db"})
+        == "/form/x.db"
+    )
+    assert (
+        setting(_Saved(), "CALIBRE_LIBRARY_DB_PATH", "", {"CALIBRE_LIBRARY_DB_PATH": ""})
+        == "/saved/metadata.db"
+    )
+    assert setting(_Saved(), "CALIBRE_LIBRARY_DB_PATH", "", None) == "/saved/metadata.db"
+
+    provider = CalibreLibrary({"CALIBRE_LIBRARY_DB_PATH": str(tmp_path / "form.db")})
+    assert provider.describe().endswith("form.db")

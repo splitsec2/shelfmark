@@ -266,7 +266,7 @@ def test_missing_file_is_enabled_but_fetch_raises_cleanly(
     with pytest.raises(FileNotFoundError):
         provider.fetch_entries()
 
-    result = library_index.test_connection("calibre")
+    result = library_index.test_connection("calibre", None)
     assert result["success"] is False
     assert str(path) in result["message"]
     assert library_index.is_in_library(_dcc(), "ebook") is False
@@ -294,7 +294,7 @@ def test_enabled_provider_answers_ebook_lookups_only(
     assert library_index.any_provider_enabled() is True
     assert library_index.is_in_library(_dcc(), "ebook") is True
     assert library_index.is_in_library(_dcc(), "audiobook") is False
-    assert library_index.test_connection("calibre") == {
+    assert library_index.test_connection("calibre", None) == {
         "success": True,
         "message": f"Calibre library at {path}: indexed 4 item(s).",
     }

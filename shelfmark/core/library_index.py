@@ -29,6 +29,8 @@ from shelfmark.core.text_match import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from shelfmark.core.library_providers import LibraryEntry, LibraryProvider
     from shelfmark.metadata_providers import BookMetadata
 
@@ -173,9 +175,12 @@ def ownership(book: BookMetadata) -> dict[str, str | None] | None:
     return result or None
 
 
-def test_connection(provider_name: str) -> dict[str, Any]:
-    """Settings action: index one library now and report the item count."""
-    provider = next((p for p in all_providers() if p.name == provider_name), None)
+def test_connection(provider_name: str, current_values: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Settings action: index one library now and report the item count.
+
+    ``current_values`` are the unsaved form values, so the button works before Save.
+    """
+    provider = next((p for p in all_providers(current_values) if p.name == provider_name), None)
     if provider is None:
         return {"success": False, "message": f"Unknown library provider: {provider_name}"}
     try:

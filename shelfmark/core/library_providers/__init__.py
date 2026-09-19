@@ -8,7 +8,10 @@ and answers whether a requested book is already on the shelf.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -47,9 +50,20 @@ class LibraryProvider(Protocol):
         ...
 
 
-def all_providers() -> list[LibraryProvider]:
-    """Concrete providers, in a fixed order."""
+def setting(
+    config: Any, key: str, default: object = "", overrides: Mapping[str, Any] | None = None
+) -> object:
+    """Read ``key`` from ``config``, preferring a non-empty unsaved form value in ``overrides``."""
+    if overrides:
+        value = overrides.get(key)
+        if value not in (None, ""):
+            return value
+    return config.get(key, default)
+
+
+def all_providers(overrides: Mapping[str, Any] | None = None) -> list[LibraryProvider]:
+    """Concrete providers, in a fixed order. ``overrides`` are unsaved form values."""
     from shelfmark.core.library_providers.audiobookshelf import AudiobookshelfLibrary
     from shelfmark.core.library_providers.calibre import CalibreLibrary
 
-    return [AudiobookshelfLibrary(), CalibreLibrary()]
+    return [AudiobookshelfLibrary(overrides), CalibreLibrary(overrides)]
