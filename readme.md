@@ -36,7 +36,7 @@ there rather than living in this fork. Merged so far:
 
 Bug fixes found while working in this code are sent upstream as separate PRs too. The
 feature branches above stay here because upstream has said this class of feature won't be
-merged — that is a scope decision, not a disagreement.
+merged. That is a scope decision of the original maintainer, and I respect that.
 
 ## How it is maintained
 
