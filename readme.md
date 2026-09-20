@@ -1,3 +1,54 @@
+> [!IMPORTANT]
+> **This is a fork of [calibrain/shelfmark](https://github.com/calibrain/shelfmark).**
+> Everything below this block is upstream's own README, unchanged. If you are not me, you
+> almost certainly want [the upstream image](https://github.com/calibrain/shelfmark) —
+> this fork exists to run one household's book pipeline, and its images are amd64-only.
+
+## What this fork adds
+
+Upstream's scope deliberately excludes library integration, automation and collection
+management ([Contributing](#contributing)). This fork adds exactly that layer, for a setup
+where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf server:
+
+| Change | Origin |
+|---|---|
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded) |
+| Read-only Calibre `metadata.db` library provider, so ebook requests skip what the library already holds | This fork |
+| *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork |
+| Auto-download matching fixes: sources that report no seeder count are no longer rejected, multi-book packs no longer satisfy single-book requests, and same-format candidates rank by download count | This fork |
+| Per-format "in your library" badges on search results and the details dialog | This fork |
+| Fork-only CI: amd64-only images, no legacy alias job — deliberately not for upstream | This fork |
+
+Docs for the added features live on the branches that carry them:
+[Hardcover sync](https://github.com/splitsec2/shelfmark/blob/build/fork-images/docs/hardcover-sync.md) ·
+[Library check](https://github.com/splitsec2/shelfmark/blob/build/fork-images/docs/library-check.md).
+
+## Upstream first
+
+Anything here that is *not* library integration or automation belongs upstream, and goes
+there rather than living in this fork. Merged so far:
+
+- [#1355](https://github.com/calibrain/shelfmark/pull/1355) — extract the per-source release
+  search out of `/api/releases` (the refactor [@InfiniteAvenger](https://github.com/InfiniteAvenger)
+  wrote as part of #1047; upstream squash-merged it under my account)
+- [#1356](https://github.com/calibrain/shelfmark/pull/1356) — provision proxy users as
+  non-admin once an admin exists
+
+Bug fixes found while working in this code are sent upstream as separate PRs too. The
+feature branches above stay here because upstream has said this class of feature won't be
+merged — that is a scope decision, not a disagreement.
+
+## How it is maintained
+
+The branch stack is **rebased** onto upstream `main`, never merged, so every fork-only commit
+stays a reviewable patch on top of current upstream. A weekly job trial-rebases the stack,
+runs upstream's test suite and reports when upstream has moved. Images publish to
+`ghcr.io/splitsec2/shelfmark:sha-<7>` from `build/fork-images`.
+
+Licence and copyright are upstream's, unchanged.
+
+---
+
 # 📚 Shelfmark: Book Search & Request Tool
 
 <img src="src/frontend/public/logo.png" alt="Shelfmark" width="200">
