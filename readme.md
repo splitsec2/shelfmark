@@ -16,6 +16,7 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | Read-only Calibre `metadata.db` library provider, so ebook requests skip what the library already holds | This fork |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork |
 | Auto-download matching fixes: sources that report no seeder count are no longer rejected, multi-book packs no longer satisfy single-book requests, and same-format candidates rank by download count | This fork |
+| Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork |
 | Per-format "in your library" badges on search results and the details dialog | This fork |
 | Fork-only CI: amd64-only images, no legacy alias job — deliberately not for upstream | This fork |
 
@@ -26,17 +27,50 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Merged so far:
+there rather than living in this fork. Eleven have merged so far.
 
-- [#1355](https://github.com/calibrain/shelfmark/pull/1355) — extract the per-source release
+Refactors and auth:
+
+- [#1355](https://github.com/calibrain/shelfmark/pull/1355) extract the per-source release
   search out of `/api/releases` (the refactor [@InfiniteAvenger](https://github.com/InfiniteAvenger)
   wrote as part of #1047; upstream squash-merged it under my account)
-- [#1356](https://github.com/calibrain/shelfmark/pull/1356) — provision proxy users as
+- [#1356](https://github.com/calibrain/shelfmark/pull/1356) provision proxy users as
   non-admin once an admin exists
 
-Bug fixes found while working in this code are sent upstream as separate PRs too. The
-feature branches above stay here because upstream has said this class of feature won't be
-merged. That is a scope decision of the original maintainer, and I respect that.
+Bugs found while working in this code, from a read of the upstream source:
+
+- [#1357](https://github.com/calibrain/shelfmark/pull/1357) check task ownership before
+  serving a queued file
+- [#1358](https://github.com/calibrain/shelfmark/pull/1358) default `is_admin` to False in
+  the request policy guard
+- [#1359](https://github.com/calibrain/shelfmark/pull/1359) reject backslash paths in the
+  OIDC `return_to` sanitizer
+- [#1360](https://github.com/calibrain/shelfmark/pull/1360) apply user updates only after
+  the payload validates
+- [#1361](https://github.com/calibrain/shelfmark/pull/1361) stop stamping CANCELLED over a
+  finished download
+- [#1367](https://github.com/calibrain/shelfmark/pull/1367) send Deluge seeding limits
+  under the keys Deluge actually reads
+- [#1368](https://github.com/calibrain/shelfmark/pull/1368) keep the host of a
+  protocol-relative download link
+- [#1369](https://github.com/calibrain/shelfmark/pull/1369) reject non-object items in the
+  batch request endpoint
+- [#1370](https://github.com/calibrain/shelfmark/pull/1370) page Google Books by the capped
+  size rather than the raw limit
+
+Open:
+
+- [#1371](https://github.com/calibrain/shelfmark/pull/1371) a configurable default content
+  type, so an audiobook-first instance does not open on the Ebook tab
+- [#1377](https://github.com/calibrain/shelfmark/pull/1377) the Calibre half of the library
+  check, after [discussion #1372](https://github.com/calibrain/shelfmark/discussions/1372)
+  where the maintainer agreed to that specific shape
+
+The rest of the feature branches stay here because upstream has said this class of feature
+won't be merged. That is a scope decision of the original maintainer, and I respect that.
+The Audiobookshelf provider is the clearest example: it rides the same provider interface
+as the Calibre one, but it is a new service integration rather than something already in
+the codebase, so it was left out of #1377 rather than bundled in.
 
 ## How it is maintained
 
