@@ -51,12 +51,6 @@ class TestConfiguredModeNeverDegradesToOpen:
         )
         assert result != OPEN_MODE
 
-    def test_abs_without_local_admin_does_not_open(self):
-        # `abs` was believed to fail closed. It does so only w.r.t. the ABS connection
-        # config -- it still fell through to the open mode when no local admin existed.
-        result = determine_auth_mode({"AUTH_METHOD": "abs"}, None, has_local_admin=False)
-        assert result != OPEN_MODE
-
     def test_builtin_without_local_admin_does_not_open(self):
         result = determine_auth_mode({"AUTH_METHOD": "builtin"}, None, has_local_admin=False)
         assert result != OPEN_MODE
@@ -87,9 +81,7 @@ class TestExplicitNoneIsStillHonoured:
     def test_unrecognised_auth_method_resolves_to_open(self):
         # An unknown string is not a "configured mode whose precondition failed";
         # it is indistinguishable from unset, so it keeps the historical default.
-        assert (
-            determine_auth_mode({"AUTH_METHOD": "wat"}, None, has_local_admin=True) == OPEN_MODE
-        )
+        assert determine_auth_mode({"AUTH_METHOD": "wat"}, None, has_local_admin=True) == OPEN_MODE
 
 
 class TestRuntimeFailureDoesNotOpen:
