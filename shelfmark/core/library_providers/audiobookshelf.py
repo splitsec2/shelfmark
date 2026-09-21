@@ -44,12 +44,21 @@ def _item_to_entry(item: dict[str, Any]) -> LibraryEntry:
     author = meta.get("authorName") or ""
     rel_path = item.get("relPath") or ""
 
-    tok = set(tokens(title)) | set(tokens(author)) | set(tokens(rel_path))
+    title_tok = set(tokens(title))
+    context_tok = set(tokens(author))
+    tok = title_tok | context_tok | set(tokens(rel_path))
 
     asin = str(meta.get("asin") or "").strip().upper()
     asins = {asin} if asin else set()
 
-    return LibraryEntry(frozenset(tok), isbn_variants(meta.get("isbn")), frozenset(asins))
+    return LibraryEntry(
+        frozenset(tok),
+        isbn_variants(meta.get("isbn")),
+        frozenset(asins),
+        frozenset(),
+        frozenset(title_tok),
+        frozenset(context_tok),
+    )
 
 
 def _fetch_library_entries(url: str, token: str, lib_ids: list[str]) -> list[LibraryEntry]:

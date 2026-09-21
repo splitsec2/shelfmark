@@ -1,7 +1,7 @@
 """Shared text-normalization + fuzzy token-matching helpers for book matching.
 
-Used by both the release matcher (``auto_download``) and the Audiobookshelf library
-ownership check (``library_index``) so matching behaviour stays consistent.
+Used by the library ownership check (``library_index``) and its providers, so every
+library matches titles, authors and ISBNs the same way.
 """
 
 from __future__ import annotations
@@ -62,6 +62,85 @@ def title_tokens_match(
         return False
     present = sum(1 for tok in title_toks if tok in haystack_tokens)
     return (present / len(title_toks)) >= threshold
+
+
+# Words marking a title that bundles several works. A shelf entry carrying one of
+# these holds the searched book, but as part of something larger, which is worth
+# telling the reader apart from owning it on its own.
+COLLECTION_MARKERS = frozenset(
+    {
+        "omnibus",
+        "collection",
+        "complete",
+        "boxed",
+        "boxset",
+        "box",
+        "set",
+        "bundle",
+        "anthology",
+        "compendium",
+        "trilogy",
+        "duology",
+        "books",
+        "volumes",
+        "vols",
+    }
+)
+
+# Words marking a different printing of the same work, which changes nothing about
+# whether the reader owns it.
+EDITION_MARKERS = frozenset(
+    {
+        "edition",
+        "editions",
+        "series",
+        "book",
+        "vol",
+        "volume",
+        "illustrated",
+        "annotated",
+        "unabridged",
+        "abridged",
+        "deluxe",
+        "revised",
+        "reissue",
+        "anniversary",
+    }
+)
+
+# Neither kind is evidence that the shelf holds a different book.
+PACKAGING_MARKERS = COLLECTION_MARKERS | EDITION_MARKERS
+
+
+def extra_work_tokens(
+    shelf_title_tokens: set[str],
+    search_title: str | None,
+    context_tokens: set[str] | None = None,
+) -> set[str]:
+    """Significant words the shelf title adds that suggest a different work.
+
+    Packaging words are ignored, since "Illustrated Edition" and "Books 1-6" describe
+    the same work differently wrapped, while "Messiah" or "Chapter Two" name another
+    Only alphabetic words of three or more characters count, so volume numbers and
+    structural words do not make a shelf entry look like a different book.
+
+    ``context_tokens`` are the entry's series and author words, which shelf titles
+    often repeat ("Alex Cross 25: Cross Kill") without meaning another book.
+    """
+    search_toks = set(tokens(search_title)) | (context_tokens or set())
+    return {
+        tok
+        for tok in shelf_title_tokens
+        # Only a real word counts. Numbers are left alone deliberately: a shelf title
+        # carries volume numbers far more often than it names a numbered sequel, and
+        # wrongly claiming ownership is the costlier mistake, since the sync then
+        # never fetches the book. "Persepolis 2" is the case this concedes.
+        if tok.isalpha()
+        and len(tok) >= 3
+        and tok not in STOPWORDS
+        and tok not in PACKAGING_MARKERS
+        and tok not in search_toks
+    }
 
 
 def normalize_isbn(value: object) -> str:
