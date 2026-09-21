@@ -42,10 +42,12 @@ _VISIBLE_SELF_SETTINGS_SECTIONS_KEY = "VISIBLE_SELF_SETTINGS_SECTIONS"
 _SELF_SETTINGS_SECTION_DELIVERY = "delivery"
 _SELF_SETTINGS_SECTION_SEARCH = "search"
 _SELF_SETTINGS_SECTION_NOTIFICATIONS = "notifications"
+_SELF_SETTINGS_SECTION_HARDCOVER = "hardcover"
 _VALID_SELF_SETTINGS_SECTIONS = (
     _SELF_SETTINGS_SECTION_DELIVERY,
     _SELF_SETTINGS_SECTION_SEARCH,
     _SELF_SETTINGS_SECTION_NOTIFICATIONS,
+    _SELF_SETTINGS_SECTION_HARDCOVER,
 )
 _DEFAULT_VISIBLE_SELF_SETTINGS_SECTIONS = list(_VALID_SELF_SETTINGS_SECTIONS)
 _USER_PREFERENCES_FALLBACK_ERRORS = (ImportError, OSError, RuntimeError, TypeError, sqlite3.Error)
@@ -175,6 +177,11 @@ def _get_allowed_self_settings_keys(visible_sections: list[str]) -> set[str]:
             key for key, _field in _get_ordered_user_overridable_fields("notifications")
         }
 
+    if _SELF_SETTINGS_SECTION_HARDCOVER in visible_sections_set:
+        allowed_keys |= {
+            key for key, _field in _get_ordered_user_overridable_fields("hardcover_sync")
+        }
+
     return allowed_keys
 
 
@@ -252,10 +259,23 @@ def register_self_user_routes(app: Flask, user_db: UserDB) -> None:
             if error_response:
                 return error_response
 
+        hardcover_preferences = None
+        if _SELF_SETTINGS_SECTION_HARDCOVER in visible_self_settings_sections:
+            hardcover_preferences, error_response = _build_optional_user_preferences(
+                user_db,
+                user_id=user_id,
+                tab_name="hardcover_sync",
+                missing_tab_error="Hardcover sync settings tab not found",
+                preference_label="hardcover",
+            )
+            if error_response:
+                return error_response
+
         user_overridable_keys = sorted(
             set(delivery_preferences.get("keys", []) if delivery_preferences else [])
             | set(search_preferences.get("keys", []) if search_preferences else [])
             | set(notification_preferences.get("keys", []) if notification_preferences else [])
+            | set(hardcover_preferences.get("keys", []) if hardcover_preferences else [])
         )
 
         return jsonify(
@@ -264,6 +284,7 @@ def register_self_user_routes(app: Flask, user_db: UserDB) -> None:
                 "deliveryPreferences": delivery_preferences,
                 "searchPreferences": search_preferences,
                 "notificationPreferences": notification_preferences,
+                "hardcoverPreferences": hardcover_preferences,
                 "userOverridableKeys": user_overridable_keys,
                 "visibleUserSettingsSections": visible_self_settings_sections,
             }
