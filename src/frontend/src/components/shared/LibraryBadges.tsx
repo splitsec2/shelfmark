@@ -7,12 +7,27 @@ const LABELS: Record<OwnedFormat, string> = {
   audiobook: 'Audiobook already in your library',
 };
 
+const COLLECTION_LABELS: Record<OwnedFormat, string> = {
+  ebook: 'Ebook in your library, inside a collection',
+  audiobook: 'Audiobook in your library, inside a collection',
+};
+
 const SHORT: Record<OwnedFormat, string> = { ebook: 'Ebook', audiobook: 'Audiobook' };
 
 /** Formats the library check reports as owned, in display order. */
 export function ownedFormats(library?: LibraryOwnership | null): OwnedFormat[] {
   if (!library) return [];
-  return (['ebook', 'audiobook'] as const).filter((format) => library[format] === true);
+  return (['ebook', 'audiobook'] as const).filter(
+    (format) => library[format] === 'owned' || library[format] === 'collection',
+  );
+}
+
+/** True when this format is only held inside a larger volume, not on its own. */
+export function isCollectionHolding(
+  library: LibraryOwnership | null | undefined,
+  format: OwnedFormat,
+): boolean {
+  return library?.[format] === 'collection';
 }
 
 function FormatIcon({ format, className }: { format: OwnedFormat; className: string }) {
@@ -66,11 +81,13 @@ export function LibraryBadges({ library, overlay = false, className = '' }: Libr
           key={format}
           className={`flex items-center gap-0.5 ${pill}`}
           style={style}
-          title={LABELS[format]}
-          aria-label={LABELS[format]}
+          title={isCollectionHolding(library, format) ? COLLECTION_LABELS[format] : LABELS[format]}
+          aria-label={
+            isCollectionHolding(library, format) ? COLLECTION_LABELS[format] : LABELS[format]
+          }
         >
           <FormatIcon format={format} className="h-3 w-3" />
-          {SHORT[format]}
+          {isCollectionHolding(library, format) ? `${SHORT[format]} (in set)` : SHORT[format]}
         </span>
       ))}
     </div>
