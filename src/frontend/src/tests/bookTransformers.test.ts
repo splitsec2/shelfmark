@@ -98,10 +98,10 @@ describe('transformMetadataToBook', () => {
   it('carries the library ownership flags through to the Book', () => {
     const book = transformMetadataToBook({
       ...metadata,
-      library: { ebook: true, audiobook: false },
+      library: { ebook: 'owned' as const, audiobook: null },
     });
 
-    expect(book.library).toEqual({ ebook: true, audiobook: false });
+    expect(book.library).toEqual({ ebook: 'owned', audiobook: null });
   });
 
   it('leaves library undefined when the API sends none', () => {

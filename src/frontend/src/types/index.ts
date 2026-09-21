@@ -14,9 +14,12 @@ export interface DisplayField {
 }
 
 // Book data types
+/** How the library holds a book, per format: owned outright, or inside a collection. */
+export type LibraryHolding = 'owned' | 'collection';
+
 export interface LibraryOwnership {
-  ebook?: boolean;
-  audiobook?: boolean;
+  ebook?: LibraryHolding | null;
+  audiobook?: LibraryHolding | null;
 }
 
 export interface Book {

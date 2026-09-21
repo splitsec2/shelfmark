@@ -341,9 +341,9 @@ def test_ownership_reports_only_formats_with_an_enabled_library(providers):
     providers.append(_Provider("calibre", {"ebook"}, [owned]))
     providers.append(_Provider("audiobookshelf", {"audiobook"}, [], enabled=False))
 
-    assert library_index.ownership(_book(isbn_13="9780593820247")) == {"ebook": True}
+    assert library_index.ownership(_book(isbn_13="9780593820247")) == {"ebook": "owned"}
     assert library_index.ownership(_book(isbn_13="9999999999999", title="Something Else")) == {
-        "ebook": False
+        "ebook": None
     }
 
 
@@ -364,6 +364,6 @@ def test_ownership_covers_both_formats_when_both_libraries_are_enabled(providers
     providers.append(_Provider("audiobookshelf", {"audiobook"}, [entry]))
 
     assert library_index.ownership(_book(isbn_13="9780593820247")) == {
-        "ebook": False,
-        "audiobook": True,
+        "ebook": None,
+        "audiobook": "owned",
     }

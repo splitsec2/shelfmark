@@ -1,4 +1,4 @@
 export { DisplayFieldIcon, DisplayFieldBadge, DisplayFieldBadges } from './DisplayFieldIcon';
 export { CircularProgress } from './CircularProgress';
 export { ToggleSwitch } from './ToggleSwitch';
-export { LibraryBadges, ownedFormats } from './LibraryBadges';
+export { LibraryBadges, ownedFormats, isCollectionHolding } from './LibraryBadges';
