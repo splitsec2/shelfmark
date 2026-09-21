@@ -118,7 +118,7 @@ def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
         context_tok = set(tokens(series.get(book_id)))
         for name in authors.get(book_id, ()):
             context_tok |= set(tokens(name))
-        tok = title_tok | context_tok
+        tok = set(tokens(title)) | context_tok
         entries.append(
             LibraryEntry(
                 frozenset(tok),
