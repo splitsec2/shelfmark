@@ -367,3 +367,27 @@ def test_ownership_covers_both_formats_when_both_libraries_are_enabled(providers
         "ebook": None,
         "audiobook": "owned",
     }
+
+
+def _titled(title_words: set[str], context: set[str]) -> LibraryEntry:
+    return LibraryEntry(
+        frozenset(title_words | context),
+        frozenset(),
+        frozenset(),
+        frozenset(),
+        frozenset(title_words),
+        frozenset(context),
+    )
+
+
+def test_a_collection_word_the_search_title_carries_is_the_book_itself() -> None:
+    shelf = [_titled({"the", "complete", "maus"}, {"art", "spiegelman"})]
+    book = _book(title="The Complete Maus", authors=["Art Spiegelman"])
+
+    assert library_index.match_entries(book, shelf) == "owned"
+
+
+def test_a_megapack_reports_itself_as_a_collection() -> None:
+    shelf = [_titled({"dungeon", "crawler", "carl", "megapack"}, {"matt", "dinniman"})]
+
+    assert library_index.match_entries(_book(), shelf) == "collection"
