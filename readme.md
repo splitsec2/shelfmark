@@ -1,8 +1,8 @@
 > [!IMPORTANT]
 > **This is a fork of [calibrain/shelfmark](https://github.com/calibrain/shelfmark).**
 > Everything below this block is upstream's own README, unchanged. If you are not me, you
-> almost certainly want [the upstream image](https://github.com/calibrain/shelfmark) —
-> this fork exists to run one household's book pipeline, and its images are amd64-only.
+> almost certainly want [the upstream image](https://github.com/calibrain/shelfmark).
+> This fork exists to run one household's book pipeline, and its images are amd64-only.
 
 ## What this fork adds
 
@@ -12,13 +12,15 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 
 | Change | Origin |
 |---|---|
-| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded) |
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) |
 | Read-only Calibre `metadata.db` library provider, so ebook requests skip what the library already holds | This fork |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork |
-| Auto-download matching fixes: sources that report no seeder count are no longer rejected, multi-book packs no longer satisfy single-book requests, and same-format candidates rank by download count | This fork |
+| Auto-download matching fixes: sources that report no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy single-book requests, same-format candidates rank by download count, and a failed download no longer stops a book from syncing again | This fork |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork |
 | Per-format "in your library" badges on search results and the details dialog | This fork |
-| Fork-only CI: amd64-only images, no legacy alias job — deliberately not for upstream | This fork |
+| Auth resolution fails closed: a configured auth mode whose settings are incomplete denies access instead of falling back to the open mode | [DrNgo/shelfmark-fork](https://github.com/DrNgo/shelfmark-fork) by [@DrNgo](https://github.com/DrNgo), cherry-picked with authorship preserved |
+| A completed book streams to the browser instead of being read into memory first | Found by [@DrNgo](https://github.com/DrNgo), re-implemented against current upstream and sent as [#1378](https://github.com/calibrain/shelfmark/pull/1378) |
+| Fork-only CI: amd64-only images and no legacy alias job. This one isn't meant for upstream | This fork |
 
 Docs for the added features live on the branches that carry them:
 [Hardcover sync](https://github.com/splitsec2/shelfmark/blob/build/fork-images/docs/hardcover-sync.md) ·
@@ -65,6 +67,13 @@ Open:
 - [#1377](https://github.com/calibrain/shelfmark/pull/1377) the Calibre half of the library
   check, after [discussion #1372](https://github.com/calibrain/shelfmark/discussions/1372)
   where the maintainer agreed to that specific shape
+- [#1378](https://github.com/calibrain/shelfmark/pull/1378) stream a completed book instead
+  of buffering it in RAM, which [@DrNgo](https://github.com/DrNgo) found
+- [#1379](https://github.com/calibrain/shelfmark/pull/1379) keep the heavy Docker build
+  layers cacheable, so an incremental pull drops from 526 MB to 3.7 MB
+- [#1380](https://github.com/calibrain/shelfmark/pull/1380) Debrid-Link as a torrent client
+- [#1381](https://github.com/calibrain/shelfmark/pull/1381) stop the proxy provisioning
+  tests depending on run order, which my #1356 introduced
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
