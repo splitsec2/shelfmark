@@ -5,25 +5,20 @@ import threading
 import pytest
 
 from shelfmark.core import hardcover_scheduler as scheduler
+from tests.core.fakes import FakeConfig
 
-
-class _Config:
-    def __init__(self, **values):
-        self.values = values
-
-    def get(self, key, default=None, user_id=None):
-        return self.values.get(key, default)
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler(monkeypatch):
     monkeypatch.setattr(scheduler, "_ctx", {})
     monkeypatch.setattr(scheduler, "_run_lock", threading.Lock())
-    monkeypatch.setattr(scheduler, "app_config", _Config())
+    monkeypatch.setattr(scheduler, "app_config", FakeConfig())
 
 
 def _configure(monkeypatch, **values):
-    monkeypatch.setattr(scheduler, "app_config", _Config(**values))
+    monkeypatch.setattr(scheduler, "app_config", FakeConfig(**values))
 
 
 @pytest.mark.parametrize(
