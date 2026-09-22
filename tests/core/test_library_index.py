@@ -10,6 +10,7 @@ from shelfmark.core import library_index
 from shelfmark.core.library_providers import LibraryEntry
 from shelfmark.core.text_match import isbn_variants
 from shelfmark.metadata_providers import BookMetadata
+from tests.core.fakes import capture_log
 
 
 def _book(**overrides: Any) -> BookMetadata:
@@ -83,14 +84,6 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     now = [1000.0]
     monkeypatch.setattr(library_index.time, "monotonic", lambda: now[0])
     return now
-
-
-def _warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    messages: list[str] = []
-    monkeypatch.setattr(
-        library_index.logger, "warning", lambda msg, *args: messages.append(msg % args)
-    )
-    return messages
 
 
 # --------------------------------------------------------------------------- #
@@ -212,7 +205,7 @@ def test_provider_error_fails_open_without_a_cache(
     providers: list[_Provider], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     providers.append(_Provider("ebook", {"ebook"}, error=OSError("no such file")))
-    warnings = _warnings(monkeypatch)
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
 
     assert library_index.is_in_library(_book(), "ebook") is False
     assert warnings == ["library check: Ebook (test) unavailable (no such file); failing open"]
@@ -227,7 +220,7 @@ def test_provider_error_keeps_answering_from_the_stale_cache(
 
     provider.error = RuntimeError("boom")
     clock[0] += library_index._CACHE_TTL_SECONDS + 1
-    warnings = _warnings(monkeypatch)
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
 
     assert library_index.is_in_library(_book(), "ebook") is True
     assert provider.fetches == 2

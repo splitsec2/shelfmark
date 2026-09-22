@@ -9,14 +9,9 @@ from shelfmark.core import hardcover_sync
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import transform_cover_url
 from shelfmark.metadata_providers import BookMetadata
+from tests.core.fakes import FakeConfig
 
-
-class _Config:
-    def __init__(self, **values):
-        self.values = values
-
-    def get(self, key, default=None, user_id=None):
-        return self.values.get(key, default)
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 
 class _Provider:
@@ -70,7 +65,7 @@ def user_db(db_path):
 
 
 def _configure(monkeypatch, **values):
-    monkeypatch.setattr(hardcover_sync, "app_config", _Config(**values))
+    monkeypatch.setattr(hardcover_sync, "app_config", FakeConfig(**values))
 
 
 @pytest.mark.parametrize(
