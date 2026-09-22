@@ -5,13 +5,19 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from shelfmark.core import library_index
 from shelfmark.core.library_providers import calibre
 from shelfmark.metadata_providers import BookMetadata
+from tests.core.fakes import FakeConfig, capture_log
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 _SCHEMA = """
 CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, uuid TEXT);
@@ -60,23 +66,22 @@ def _make_library(path: Path, *, wal: bool = False) -> None:
     conn.close()
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, path: Path, *, enabled: bool = True) -> None:
-    values: dict[str, Any] = {
-        "CALIBRE_LIBRARY_DB_PATH": str(path),
-        "LIBRARY_CHECK_CALIBRE_ENABLED": enabled,
-    }
-    monkeypatch.setattr(
-        calibre.app_config,
-        "get",
-        lambda key, default=None, user_id=None: values.get(key, default),
-    )
-    monkeypatch.setattr(library_index, "_cache", {})
+@pytest.fixture
+def calibre_library(tmp_path: Path, fake_app_config: FakeConfig) -> Callable[..., Path]:
+    """Build a Calibre library (unless ``create=False``) and point the provider at it."""
 
+    def make(
+        *, path: Path | None = None, wal: bool = False, enabled: bool = True, create: bool = True
+    ) -> Path:
+        path = path or tmp_path / "metadata.db"
+        if create:
+            _make_library(path, wal=wal)
+        fake_app_config.values.update(
+            CALIBRE_LIBRARY_DB_PATH=str(path), LIBRARY_CHECK_CALIBRE_ENABLED=enabled
+        )
+        return path
 
-def _infos(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    messages: list[str] = []
-    monkeypatch.setattr(calibre.logger, "info", lambda msg, *args: messages.append(msg % args))
-    return messages
+    return make
 
 
 def _by_token(entries: list[Any], token: str) -> Any:
@@ -95,11 +100,9 @@ def _dcc() -> BookMetadata:
 
 
 def test_indexes_titles_authors_series_and_identifiers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    calibre_library: Callable[..., Path],
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    calibre_library()
 
     entries = calibre.CalibreLibrary().fetch_entries()
 
@@ -126,22 +129,18 @@ def test_indexes_titles_authors_series_and_identifiers(
     assert (draft.isbns, draft.asins, draft.external_ids) == (frozenset(), frozenset(), frozenset())
 
 
-def test_reads_a_read_only_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
+def test_reads_a_read_only_file(calibre_library: Callable[..., Path]) -> None:
+    path = calibre_library()
     path.chmod(0o444)
-    _configure(monkeypatch, path)
 
     assert len(calibre.CalibreLibrary().fetch_entries()) == 4
 
 
 def test_wal_reads_see_uncheckpointed_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path, wal=True)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    path = calibre_library(wal=True)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     writer = sqlite3.connect(path)
     writer.execute("PRAGMA wal_autocheckpoint=0")
@@ -159,16 +158,14 @@ def test_wal_reads_see_uncheckpointed_writes(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root is not bound by directory permissions")
 def test_wal_without_side_files_on_a_read_only_mount_uses_a_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
     lib_dir = tmp_path / "library"
     lib_dir.mkdir()
-    path = lib_dir / "metadata.db"
-    _make_library(path, wal=True)
+    calibre_library(path=lib_dir / "metadata.db", wal=True)
     for suffix in ("-wal", "-shm"):
         (lib_dir / f"metadata.db{suffix}").unlink(missing_ok=True)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     lib_dir.chmod(0o555)
     try:
@@ -183,12 +180,10 @@ def test_wal_without_side_files_on_a_read_only_mount_uses_a_snapshot(
 
 
 def test_in_place_open_failure_falls_back_to_an_immutable_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    calibre_library()
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     real_connect = sqlite3.connect
     uris: list[str] = []
@@ -208,13 +203,11 @@ def test_in_place_open_failure_falls_back_to_an_immutable_open(
 
 
 def test_locked_database_falls_back_to_a_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
     monkeypatch.setattr(calibre, "_BUSY_TIMEOUT_SECONDS", 0.01)
-    infos = _infos(monkeypatch)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     writer = sqlite3.connect(path, isolation_level=None)
     writer.execute("BEGIN EXCLUSIVE")
@@ -230,20 +223,15 @@ def test_locked_database_falls_back_to_a_snapshot(
 
 
 def test_unreadable_database_raises_and_the_facade_fails_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
 
     def always_fail(database: str, **kwargs: Any) -> sqlite3.Connection:
         raise sqlite3.OperationalError("disk I/O error")
 
     monkeypatch.setattr(calibre.sqlite3, "connect", always_fail)
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        library_index.logger, "warning", lambda msg, *args: warnings.append(msg % args)
-    )
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
 
     with pytest.raises(sqlite3.OperationalError):
         calibre.CalibreLibrary().fetch_entries()
@@ -254,10 +242,9 @@ def test_unreadable_database_raises_and_the_facade_fails_open(
 
 
 def test_missing_file_is_enabled_but_fetch_raises_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "missing.db"
-    _configure(monkeypatch, path)
+    path = calibre_library(path=tmp_path / "missing.db", create=False)
     provider = calibre.CalibreLibrary()
 
     assert provider.is_enabled() is True
@@ -272,24 +259,16 @@ def test_missing_file_is_enabled_but_fetch_raises_cleanly(
     assert library_index.is_in_library(_dcc(), "ebook") is False
 
 
-def test_disabled_provider_is_not_consulted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path, enabled=False)
+def test_disabled_provider_is_not_consulted(calibre_library: Callable[..., Path]) -> None:
+    calibre_library(enabled=False)
 
     assert calibre.CalibreLibrary().is_enabled() is False
     assert library_index.any_provider_enabled() is False
     assert library_index.is_in_library(_dcc(), "ebook") is False
 
 
-def test_enabled_provider_answers_ebook_lookups_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+def test_enabled_provider_answers_ebook_lookups_only(calibre_library: Callable[..., Path]) -> None:
+    path = calibre_library()
 
     assert library_index.any_provider_enabled() is True
     assert library_index.is_in_library(_dcc(), "ebook") is True
@@ -301,11 +280,9 @@ def test_enabled_provider_answers_ebook_lookups_only(
 
 
 def test_fingerprint_follows_the_database_and_wal_mtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
     provider = calibre.CalibreLibrary()
 
     assert provider.fingerprint() == path.stat().st_mtime
