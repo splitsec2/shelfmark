@@ -14,6 +14,7 @@ import requests
 from shelfmark.core.config import config as app_config
 from shelfmark.core.library_providers import LibraryEntry, setting
 from shelfmark.core.text_match import isbn_variants, tokens
+from shelfmark.core.utils import normalize_http_url
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -24,19 +25,21 @@ _ITEMS_PAGE_LIMIT = 500
 
 def _config(overrides: Mapping[str, Any] | None = None) -> tuple[bool, str, str, list[str]]:
     enabled = bool(setting(app_config, "LIBRARY_CHECK_ENABLED", False, overrides))
-    url = str(setting(app_config, "AUDIOBOOKSHELF_URL", "", overrides) or "").strip().rstrip("/")
+    url = normalize_http_url(str(setting(app_config, "AUDIOBOOKSHELF_URL", "", overrides) or ""))
     token = str(setting(app_config, "AUDIOBOOKSHELF_TOKEN", "", overrides) or "").strip()
     lib_ids_raw = str(setting(app_config, "AUDIOBOOKSHELF_LIBRARY_IDS", "", overrides) or "")
     lib_ids = [s.strip() for s in lib_ids_raw.split(",") if s.strip()]
     return enabled, url, token, lib_ids
 
 
-def _session(token: str) -> requests.Session:
+def _session(url: str, token: str) -> requests.Session:
     from shelfmark.download.network import get_ssl_verify
 
     session = requests.Session()
     session.headers.update({"Authorization": f"Bearer {token}"})
-    session.verify = get_ssl_verify()
+    # The URL lets CERTIFICATE_VALIDATION=disabled_local skip verification for a LAN
+    # server, which is where Audiobookshelf usually lives.
+    session.verify = get_ssl_verify(url)
     return session
 
 
@@ -65,7 +68,7 @@ def _item_to_entry(item: dict[str, Any]) -> LibraryEntry:
 
 
 def _fetch_library_entries(url: str, token: str, lib_ids: list[str]) -> list[LibraryEntry]:
-    session = _session(token)
+    session = _session(url, token)
 
     resp = session.get(f"{url}/api/libraries", timeout=_REQUEST_TIMEOUT)
     resp.raise_for_status()
