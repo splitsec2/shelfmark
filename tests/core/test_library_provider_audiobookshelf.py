@@ -73,7 +73,7 @@ class _Session:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, session: _Session) -> None:
-    monkeypatch.setattr(audiobookshelf, "_session", lambda token: session)
+    monkeypatch.setattr(audiobookshelf, "_session", lambda url, token: session)
     monkeypatch.setattr(audiobookshelf, "_ITEMS_PAGE_LIMIT", 2)
 
 
@@ -166,3 +166,32 @@ def test_fetch_entries_requires_url_and_token() -> None:
     assert provider.describe() == "Audiobookshelf"
     with pytest.raises(ValueError, match="URL and token"):
         provider.fetch_entries()
+
+
+@pytest.mark.parametrize(
+    ("mode", "url", "verify"),
+    [
+        ("disabled_local", "https://10.0.0.91:13378", False),
+        ("disabled_local", "https://abs.example.com", True),
+        ("enabled", "https://10.0.0.91:13378", True),
+    ],
+)
+def test_session_honours_certificate_validation_for_the_server_url(
+    fake_app_config: FakeConfig, mode: str, url: str, verify: bool
+) -> None:
+    fake_app_config.values["CERTIFICATE_VALIDATION"] = mode
+
+    assert audiobookshelf._session(url, "t").verify is verify
+
+
+def test_configured_url_is_normalized(fake_app_config: FakeConfig) -> None:
+    fake_app_config.values.update(
+        LIBRARY_CHECK_ENABLED=True,
+        AUDIOBOOKSHELF_URL=' "abs.lan:13378/" ',
+        AUDIOBOOKSHELF_TOKEN="t",
+    )
+
+    assert (
+        audiobookshelf.AudiobookshelfLibrary().describe()
+        == "Audiobookshelf at http://abs.lan:13378"
+    )
