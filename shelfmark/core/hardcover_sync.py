@@ -14,6 +14,7 @@ from shelfmark.core import library_index
 from shelfmark.core.config import config as app_config
 from shelfmark.core.download_history_service import ACTIVE_DOWNLOAD_STATUS
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.request_policy import normalize_content_type
 from shelfmark.core.utils import transform_cover_url
 
 if TYPE_CHECKING:
@@ -104,8 +105,8 @@ def _build_provider(user_id: int | None = None) -> Any | None:
 
 def resolve_request_owner(user_db: UserDB) -> int | None:
     """Return the lowest-id admin, who owns synced requests and approves auto-downloads."""
-    admins = [user for user in user_db.list_users() if user.get("role") == "admin"]
-    return int(admins[0]["id"]) if admins else None
+    admin = user_db.get_first_admin()
+    return int(admin["id"]) if admin else None
 
 
 def _primary_author(book: BookMetadata) -> str:
@@ -147,8 +148,12 @@ def _existing_request_keys(user_db: UserDB, user_id: int | None = None) -> set[t
         if isinstance(book_data, dict):
             pid = book_data.get("provider_id") or book_data.get("id")
             if pid is not None:
-                content_type = str(row.get("content_type") or book_data.get("content_type") or "")
-                keys.add((str(pid), content_type.lower()))
+                # Normalized the way requests_service's duplicate check does, so a row
+                # with no content type counts as the ebook request it is treated as.
+                content_type = normalize_content_type(
+                    row.get("content_type") or book_data.get("content_type")
+                )
+                keys.add((str(pid), content_type))
     return keys
 
 
