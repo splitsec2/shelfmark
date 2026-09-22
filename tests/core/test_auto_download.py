@@ -275,14 +275,14 @@ class TestAutoDownloadRequest:
         chosen = _release(source="second", source_id="good", seeders=5)
         searched = []
 
-        def _search(_book_arg, *, sources, **_kwargs):
-            searched.extend(sources)
-            if sources == ["first"]:
+        def _search(source_name, _book_arg, **kwargs):
+            searched.append((source_name, kwargs["user_id"]))
+            if source_name == "first":
                 epub = _release(source="first", title="Dungeon Crawler Carl.epub", format="epub")
-                return [epub], {"first": [epub]}, []
-            return [chosen], {"second": [chosen]}, []
+                return None, [epub], None
+            return None, [chosen], None
 
-        monkeypatch.setattr(auto_download, "search_book_releases", _search)
+        monkeypatch.setattr(auto_download, "search_source_releases", _search)
         queued = []
 
         def _queue(release_data, priority, *, user_id, username):
@@ -293,7 +293,8 @@ class TestAutoDownloadRequest:
 
         assert outcome.status == "queued"
         assert outcome.source == "second"
-        assert searched == ["first", "second"]
+        # Searched as the requester, so their default languages apply.
+        assert searched == [("first", reader["id"]), ("second", reader["id"])]
 
         stored = user_db.get_request(row["id"])
         assert stored["status"] == "fulfilled"
@@ -316,8 +317,8 @@ class TestAutoDownloadRequest:
         chosen = _release(source="first")
         monkeypatch.setattr(
             auto_download,
-            "search_book_releases",
-            lambda *_args, **_kwargs: ([chosen], {"first": [chosen]}, []),
+            "search_source_releases",
+            lambda *_args, **_kwargs: (None, [chosen], None),
         )
 
         outcome = self._run(
@@ -338,8 +339,8 @@ class TestAutoDownloadRequest:
         wrong = _release(title="A Different Audiobook [M4B]")
         monkeypatch.setattr(
             auto_download,
-            "search_book_releases",
-            lambda *_args, **_kwargs: ([wrong], {"first": [wrong], "second": [wrong]}, []),
+            "search_source_releases",
+            lambda *_args, **_kwargs: (None, [wrong], None),
         )
 
         def _never_queue(*_args, **_kwargs):
@@ -364,7 +365,7 @@ class TestAutoDownloadRequest:
         def _never_search(*_args, **_kwargs):
             raise AssertionError("release search must not run")
 
-        monkeypatch.setattr(auto_download, "search_book_releases", _never_search)
+        monkeypatch.setattr(auto_download, "search_source_releases", _never_search)
 
         outcome = self._run(user_db, row, admin)
 
@@ -449,8 +450,8 @@ class TestContentTypeAwareMatching:
         assert auto_download.pick_best_release([mobi, azw3, epub], "ebook") is epub
         assert auto_download.pick_best_release([mobi, azw3], "ebook") is azw3
 
-    def test_ebook_formats_follow_supported_formats_setting(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", FakeConfig(SUPPORTED_FORMATS=["pdf"]))
+    def test_ebook_formats_follow_supported_formats_setting(self, fake_app_config):
+        fake_app_config.values["SUPPORTED_FORMATS"] = ["pdf"]
 
         assert auto_download._ebook_formats() == {"pdf"}
         assert auto_download.strict_match(
@@ -610,3 +611,12 @@ class TestOtherWorkGuard:
         release = _release(title=release_title)
 
         assert auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
+
+
+def test_every_processable_audiobook_format_outranks_an_unknown_one():
+    flac = _release(format="flac", title="Dungeon Crawler Carl - Matt Dinniman [FLAC]")
+    unknown = _release(format="xyz", title="Dungeon Crawler Carl - Matt Dinniman", seeders=99)
+    m4b = _release(format="m4b")
+
+    assert auto_download.pick_best_release([unknown, flac]) is flac
+    assert auto_download.pick_best_release([flac, m4b]) is m4b
