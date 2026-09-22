@@ -6,16 +6,12 @@ from shelfmark.core import auto_download
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseProtocol
+from tests.core.fakes import FakeConfig
 
 AUDIOBOOK_FORMATS = {"m4b", "mp3"}
 
 
-class _Config:
-    def __init__(self, **values):
-        self.values = values
-
-    def get(self, key, default=None, user_id=None):
-        return self.values.get(key, default)
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 
 def _book(**overrides):
@@ -212,7 +208,7 @@ class TestConfiguredSourcePriority:
 
     def _configure(self, monkeypatch, priority):
         monkeypatch.setattr(
-            auto_download, "app_config", _Config(AUTO_DOWNLOAD_SOURCE_PRIORITY=priority)
+            auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_SOURCE_PRIORITY=priority)
         )
 
     def test_respects_configured_order_and_skips_unusable_entries(self, monkeypatch):
@@ -238,7 +234,7 @@ class TestConfiguredSourcePriority:
 
 class TestAutoDownloadPending:
     def test_disabled_returns_zeros_without_touching_the_db(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=False))
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=False))
 
         class _UntouchableDb:
             def list_requests(self, **_kwargs):
@@ -254,7 +250,7 @@ class TestAutoDownloadPending:
 class TestAutoDownloadRequest:
     @pytest.fixture(autouse=True)
     def _library_check_off(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", _Config(LIBRARY_CHECK_ENABLED=False))
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(LIBRARY_CHECK_ENABLED=False))
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: False
         )
@@ -359,7 +355,7 @@ class TestAutoDownloadRequest:
         reader = user_db.create_user(username="reader", role="user")
         row = _pending_request(user_db, reader["id"])
         _stub_provider(monkeypatch, _book())
-        monkeypatch.setattr(auto_download, "app_config", _Config(LIBRARY_CHECK_ENABLED=True))
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(LIBRARY_CHECK_ENABLED=True))
         monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: True
@@ -388,7 +384,7 @@ class TestAutoDownloadRequest:
 
 
 def test_pending_pass_without_an_admin_queues_nothing(user_db, monkeypatch):
-    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=True))
     user_db.create_user(username="reader", role="user")
 
     summary = auto_download.auto_download_pending(
@@ -454,7 +450,7 @@ class TestContentTypeAwareMatching:
         assert auto_download.pick_best_release([mobi, azw3], "ebook") is azw3
 
     def test_ebook_formats_follow_supported_formats_setting(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", _Config(SUPPORTED_FORMATS=["pdf"]))
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(SUPPORTED_FORMATS=["pdf"]))
 
         assert auto_download._ebook_formats() == {"pdf"}
         assert auto_download.strict_match(
@@ -480,7 +476,7 @@ class TestContentTypeSourcePriority:
         monkeypatch.setattr(
             auto_download,
             "app_config",
-            _Config(
+            FakeConfig(
                 AUTO_DOWNLOAD_SOURCE_PRIORITY=[{"id": "audio_only"}],
                 AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY=[{"id": "both"}, {"id": "audio_only"}],
             ),
@@ -490,14 +486,14 @@ class TestContentTypeSourcePriority:
         assert auto_download._configured_source_priority("audiobook") == ["audio_only"]
 
     def test_fallback_is_filtered_by_content_type(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", _Config())
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig())
 
         assert auto_download._configured_source_priority("ebook") == ["ebook_only", "both"]
         assert auto_download._configured_source_priority("audiobook") == ["audio_only", "both"]
 
 
 def test_pending_pass_follows_each_request_content_type(user_db, monkeypatch):
-    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=True))
     admin = user_db.create_user(username="admin", role="admin")
     for content_type in ("ebook", "audiobook"):
         user_db.create_request(

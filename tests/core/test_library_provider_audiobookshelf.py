@@ -7,6 +7,9 @@ from typing import Any
 import pytest
 
 from shelfmark.core.library_providers import audiobookshelf
+from tests.core.fakes import FakeConfig
+
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 
 def _item(title: str, author: str, rel_path: str = "", **meta: Any) -> dict[str, Any]:
@@ -147,13 +150,9 @@ def test_fetch_stops_on_an_empty_page(monkeypatch: pytest.MonkeyPatch) -> None:
     ids=["configured", "missing-token", "disabled"],
 )
 def test_provider_is_enabled_only_when_configured(
-    monkeypatch: pytest.MonkeyPatch, values: dict[str, Any], enabled: bool
+    fake_app_config: FakeConfig, values: dict[str, Any], enabled: bool
 ) -> None:
-    monkeypatch.setattr(
-        audiobookshelf.app_config,
-        "get",
-        lambda key, default=None, user_id=None: values.get(key, default),
-    )
+    fake_app_config.values.update(values)
     provider = audiobookshelf.AudiobookshelfLibrary()
 
     assert provider.is_enabled() is enabled
@@ -161,10 +160,7 @@ def test_provider_is_enabled_only_when_configured(
     assert provider.fingerprint() is None
 
 
-def test_fetch_entries_requires_url_and_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        audiobookshelf.app_config, "get", lambda key, default=None, user_id=None: default
-    )
+def test_fetch_entries_requires_url_and_token() -> None:
     provider = audiobookshelf.AudiobookshelfLibrary()
 
     assert provider.describe() == "Audiobookshelf"
