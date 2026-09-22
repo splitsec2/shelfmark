@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from shelfmark.core import library_index
 from shelfmark.core.config import config as app_config
+from shelfmark.core.download_history_service import ACTIVE_DOWNLOAD_STATUS
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import transform_cover_url
 
@@ -152,7 +153,11 @@ def _existing_request_keys(user_db: UserDB, user_id: int | None = None) -> set[t
 
 
 def _already_downloaded(db_path: str | None, title: str, author: str, content_type: str) -> bool:
-    """Best-effort check that a title/author isn't already in download_history for this type."""
+    """Best-effort check that a title/author is already downloaded (or downloading) for this type.
+
+    Failed and cancelled downloads don't count, so a book whose download broke is
+    picked up again on the next sync rather than skipped for good.
+    """
     if not db_path:
         return False
     try:
@@ -161,8 +166,14 @@ def _already_downloaded(db_path: str | None, title: str, author: str, content_ty
             row = conn.execute(
                 "SELECT 1 FROM download_history "
                 "WHERE LOWER(title) = ? AND LOWER(author) = ? "
-                "AND (content_type IS NULL OR LOWER(content_type) = ?) LIMIT 1",
-                (title.strip().lower(), author.strip().lower(), content_type.lower()),
+                "AND (content_type IS NULL OR LOWER(content_type) = ?) "
+                "AND final_status IN ('complete', ?) LIMIT 1",
+                (
+                    title.strip().lower(),
+                    author.strip().lower(),
+                    content_type.lower(),
+                    ACTIVE_DOWNLOAD_STATUS,
+                ),
             ).fetchone()
             return row is not None
         finally:
