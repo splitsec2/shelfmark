@@ -32,6 +32,8 @@ A release is a strict match only when all of the following hold:
 
 Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
+A download that fails, is cancelled, or never leaves the queue does not stay failed forever. Once it has sat failed for **Retry failed downloads after (days)** (7 by default), the request goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. Set it to 0 to turn retries off. Rejecting a request is a decision and is never retried, so reject one you don't want. Cancelling a download by hand counts as a failure for this, so it comes back after the cooldown unless you reject the request.
+
 ### Library check
 
 When enabled, both shelf sync and automatic downloads look the book up in the libraries you have connected — Audiobookshelf for audiobook requests, a Calibre library (Calibre-Web / Calibre-Web Automated) for ebook requests — by provider id, ISBN, or fuzzy title plus author surname, and skip it if it is already there. Each library is indexed at most every 10 minutes. Settings, mounting and the matching rules are described in [Library Check](library-check.md).

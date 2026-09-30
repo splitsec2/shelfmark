@@ -202,6 +202,18 @@ def hardcover_sync_settings() -> list[SettingsField]:
             min_value=0,
             max_value=1000,
         ),
+        NumberField(
+            key="AUTO_DOWNLOAD_RETRY_DAYS",
+            label="Retry failed downloads after (days)",
+            description=(
+                "A synced request whose download failed, was cancelled or never left the "
+                "queue goes back to pending after this many days and is tried again, a few "
+                "per pass. 0 turns retries off. Reject a request to stop it being retried."
+            ),
+            default=7,
+            min_value=0,
+            max_value=365,
+        ),
         HeadingField(
             key="library_check_heading",
             title="Library Check",
