@@ -227,6 +227,57 @@ def test_provider_error_keeps_answering_from_the_stale_cache(
     assert len(warnings) == 1
 
 
+def test_a_strict_check_refuses_to_guess_when_a_library_is_down_and_nothing_is_cached(
+    providers: list[_Provider],
+) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    with pytest.raises(library_index.LibraryUnavailableError, match=r"Ebook \(test\)"):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+
+
+def test_a_strict_check_still_answers_from_a_stale_cache(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, [_DCC_ENTRY])
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "ebook", strict=True) is True
+
+    provider.error = RuntimeError("boom")
+    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+
+    assert library_index.is_in_library(_book(), "ebook", strict=True) is True
+
+
+def test_a_down_library_leaves_the_badges_fail_open(providers: list[_Provider]) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    assert library_index.ownership(_book()) == {"ebook": None}
+
+
+def test_require_ready_names_the_library_that_cannot_be_read(providers: list[_Provider]) -> None:
+    providers.append(_Provider("audiobook", {"audiobook"}, [_DCC_ENTRY]))
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    with pytest.raises(library_index.LibraryUnavailableError, match=r"Ebook \(test\)"):
+        library_index.require_ready()
+
+
+def test_require_ready_passes_once_every_enabled_library_has_been_read(
+    providers: list[_Provider],
+) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, [_DCC_ENTRY]))
+    providers.append(_Provider("audiobook", {"audiobook"}, [_DCC_ENTRY]))
+
+    library_index.require_ready()  # does not raise
+
+
+def test_require_ready_ignores_a_disabled_library(providers: list[_Provider]) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, enabled=False, error=OSError("mount gone")))
+
+    library_index.require_ready()  # does not raise
+
+
 def test_entries_are_cached_until_the_ttl_expires(
     providers: list[_Provider], clock: list[float]
 ) -> None:
