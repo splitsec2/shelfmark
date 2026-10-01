@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config as app_config
@@ -34,6 +35,78 @@ _thread_lock = threading.Lock()
 
 # Prevents a scheduled cycle and a manual "Sync now" from overlapping.
 _run_lock = threading.Lock()
+
+_OVERDUE_INTERVALS = 2  # A cycle this many intervals late is reported as a problem.
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _new_state() -> dict[str, Any]:
+    return {
+        "started_at": _now(),
+        "last_cycle_at": None,
+        "last_cycle_errors": 0,
+        "consecutive_failed_cycles": 0,
+    }
+
+
+# What the last cycle did, for /api/stats and /api/health. In memory: a restart starts clean.
+_state_lock = threading.Lock()
+_state: dict[str, Any] = _new_state()
+
+
+def _cycle_errors(result: dict[str, Any]) -> int:
+    """Errors a finished cycle reported, across the sync and the auto-download pass."""
+    total = 0
+    for key, field in (("sync", "errors"), ("auto_download", "error")):
+        part = result.get(key)
+        if isinstance(part, dict):
+            total += int(part.get(field, 0) or 0)
+    return total
+
+
+def _record_cycle(errors: int) -> None:
+    with _state_lock:
+        _state["last_cycle_at"] = _now()
+        _state["last_cycle_errors"] = errors
+        _state["consecutive_failed_cycles"] = (
+            _state["consecutive_failed_cycles"] + 1 if errors else 0
+        )
+
+
+def status() -> dict[str, Any]:
+    """The background cycle's health: when it last ran, what it hit, and what is wrong."""
+    enabled = _enabled()
+    interval = _interval_seconds()
+    now = _now()
+    with _state_lock:
+        state = dict(_state)
+    thread_alive = _thread is not None and _thread.is_alive()
+    last = state["last_cycle_at"]
+
+    problems: list[str] = []
+    if enabled:
+        if not thread_alive:
+            problems.append("scheduler thread is not running")
+        if state["last_cycle_errors"]:
+            problems.append(f"last cycle had {state['last_cycle_errors']} error(s)")
+        reference = last if last is not None else state["started_at"] + _WARMUP_SECONDS
+        if now - reference > _OVERDUE_INTERVALS * interval:
+            problems.append(f"no cycle in {int((now - reference) // 3600)}h")
+
+    return {
+        "enabled": enabled,
+        "thread_alive": thread_alive,
+        "interval_seconds": int(interval),
+        "last_cycle_at": datetime.fromtimestamp(last, UTC).isoformat() if last else None,
+        "seconds_since_last_cycle": int(now - last) if last is not None else None,
+        "last_cycle_errors": state["last_cycle_errors"],
+        "consecutive_failed_cycles": state["consecutive_failed_cycles"],
+        "healthy": not problems,
+        "problems": problems,
+    }
 
 
 def configure(
@@ -120,11 +193,19 @@ def run_once(*, force: bool = False) -> dict[str, Any]:
 
         from shelfmark.core.auto_download import auto_download_pending
 
-        sync_summary: dict[str, Any] | None = None
-        if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
-            sync_summary = _sync_all_accounts(user_db, db_path=db_path)
-        auto_summary = auto_download_pending(user_db, queue_release=queue_release, db_path=db_path)
-        return {"status": "ok", "sync": sync_summary, "auto_download": auto_summary}
+        try:
+            sync_summary: dict[str, Any] | None = None
+            if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
+                sync_summary = _sync_all_accounts(user_db, db_path=db_path)
+            auto_summary = auto_download_pending(
+                user_db, queue_release=queue_release, db_path=db_path
+            )
+        except Exception:
+            _record_cycle(1)
+            raise
+        result = {"status": "ok", "sync": sync_summary, "auto_download": auto_summary}
+        _record_cycle(_cycle_errors(result))
+        return result
     finally:
         _run_lock.release()
 
