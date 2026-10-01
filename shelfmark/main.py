@@ -1509,7 +1509,18 @@ def api_health() -> Response | tuple[Response, int]:
         flask.Response: JSON with status "ok" and optional degraded features.
 
     """
-    response: dict[str, object] = {"status": "ok"}
+    from shelfmark.core import hardcover_scheduler
+
+    scheduler = hardcover_scheduler.status()
+    response: dict[str, object] = {
+        "status": "ok",
+        # What a monitor keys on: the container can be up while the sync cycle is not.
+        "scheduler": {
+            "enabled": scheduler["enabled"],
+            "healthy": scheduler["healthy"],
+            "seconds_since_last_cycle": scheduler["seconds_since_last_cycle"],
+        },
+    }
 
     # Report degraded features
     if not backend.WEBSOCKET_AVAILABLE:
