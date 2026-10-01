@@ -70,3 +70,17 @@ curl -s -H "Authorization: Bearer $SHELFMARK_API_KEY" https://shelfmark.example.
 - The key is a root-equivalent credential: an admin can configure a custom
   post-download script that the server executes, so treat it like a root
   password and send it only over HTTPS.
+
+## Read-only key and dashboard stats
+
+Set `SHELFMARK_API_KEY_READONLY` to a second secret for dashboards and monitors. It can read one endpoint,
+`GET /api/stats`, and nothing else. Writes and every other path return 403, and the key never gets a session.
+The admin key reaches `/api/stats` too.
+
+```bash
+curl -s -H "X-Api-Key: $SHELFMARK_API_KEY_READONLY" https://shelfmark.example.com/api/stats
+```
+
+The response has counts only: books added in the last 7 and 30 days by format, the queue, requests by outcome,
+download failures and restart interruptions in the last 7 days, and the sync scheduler's health.
+`/api/health` also carries a `scheduler` block (`enabled`, `healthy`, `seconds_since_last_cycle`) that needs no key.
