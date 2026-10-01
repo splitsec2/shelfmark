@@ -243,6 +243,14 @@ def sync_wishlist(
 
     content_types = _configured_content_types()
     library_check = library_index.any_provider_enabled()
+    if library_check:
+        try:
+            library_index.require_ready()
+        except library_index.LibraryUnavailableError as exc:
+            # Requesting now would queue books the library may already hold.
+            logger.warning("hardcover-sync: %s; skipping this sync", exc)
+            summary["errors"] += 1
+            return summary
     known_requests = _existing_request_keys(user_db, user_id if per_user else None)
 
     from shelfmark.core.requests_service import RequestServiceError, create_request

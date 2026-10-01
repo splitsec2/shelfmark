@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from shelfmark.core import auto_download, text_match
+from shelfmark.core import auto_download, library_index, text_match
 from shelfmark.core.download_history_service import DownloadHistoryService
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
@@ -374,6 +374,33 @@ class TestAutoDownloadRequest:
         outcome = self._run(user_db, row, admin)
 
         assert outcome.status == "in_library"
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_library_that_cannot_be_read_stops_the_request_before_searching(
+        self, user_db, monkeypatch
+    ):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
+
+        def _is_in_library(_book, _content_type=None, *, strict=False):
+            if strict:
+                raise library_index.LibraryUnavailableError("Audiobookshelf is unavailable")
+            return False  # what the old fail-open path would have answered
+
+        monkeypatch.setattr("shelfmark.core.library_index.is_in_library", _is_in_library)
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda *_a, **_k: pytest.fail("a request must not be searched for blind"),
+        )
+
+        outcome = self._run(user_db, row, admin)
+
+        assert outcome.status == "error"
+        assert "library" in outcome.detail
         assert user_db.get_request(row["id"])["status"] == "pending"
 
     def test_unregistered_provider_is_skipped(self, user_db, monkeypatch):

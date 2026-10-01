@@ -550,7 +550,17 @@ def auto_download_request(
     # Final guard: skip if the book is already in a library holding this content type.
     from shelfmark.core import library_index
 
-    if library_index.any_provider_enabled() and library_index.is_in_library(book, content_type):
+    try:
+        in_library = library_index.any_provider_enabled() and library_index.is_in_library(
+            book, content_type, strict=True
+        )
+    except library_index.LibraryUnavailableError as exc:
+        # Unattended: do not download blind. The request stays pending for the next cycle.
+        logger.warning(
+            "auto-download: request %s held, library check unavailable: %s", request_id, exc
+        )
+        return AutoDownloadOutcome(request_id, "error", f"library check unavailable: {exc}")
+    if in_library:
         logger.info(
             "auto-download: request %s (%s) already in library; skipping",
             request_id,

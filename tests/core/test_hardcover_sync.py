@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shelfmark.core import hardcover_sync
+from shelfmark.core import hardcover_sync, library_index
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import transform_cover_url
 from shelfmark.metadata_providers import BookMetadata
@@ -205,6 +205,26 @@ class TestSyncWishlist:
 
     def _use_provider(self, monkeypatch, provider):
         monkeypatch.setattr(hardcover_sync, "_build_provider", lambda *_args: provider)
+
+    def test_a_library_that_cannot_be_read_stops_the_sync_before_anything_is_requested(
+        self, user_db, db_path, monkeypatch
+    ):
+        user = user_db.create_user(username="reader", role="user")
+        provider = _Provider({1: [[_book(1, "Dungeon Crawler Carl")]]})
+        self._use_provider(monkeypatch, provider)
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
+
+        def _down(*_args, **_kwargs):
+            raise library_index.LibraryUnavailableError("Audiobookshelf is unavailable")
+
+        monkeypatch.setattr("shelfmark.core.library_index.require_ready", _down)
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=user["id"])
+
+        # Skipping is the safe side: syncing now would request books the library already holds.
+        assert summary == {"added": 0, "skipped": 0, "in_library": 0, "errors": 1}
+        assert provider.calls == []  # Hardcover was not even asked
+        assert user_db.list_requests() == []
 
     def test_adds_new_requests_across_pages(self, user_db, db_path, monkeypatch):
         user = user_db.create_user(username="reader", role="user")
