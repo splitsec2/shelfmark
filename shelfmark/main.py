@@ -1376,7 +1376,7 @@ def api_config() -> Response | tuple[Response, int]:
 @app.route("/api/stats", methods=["GET"])
 def api_stats() -> Response | tuple[Response, int]:
     """Counters for dashboards. Reachable with the read-only API key, an admin key or an admin session."""
-    from shelfmark.core import stats
+    from shelfmark.core import hardcover_scheduler, stats
 
     scope = g.get("api_key_scope")
     if get_auth_mode() != "none" and scope is None:
@@ -1392,6 +1392,7 @@ def api_stats() -> Response | tuple[Response, int]:
     except sqlite3.Error:
         logger.exception("stats: could not read the database")
         return jsonify({"error": "Internal Server Error"}), 500
+    payload["scheduler"] = hardcover_scheduler.status()
     return jsonify(payload)
 
 
@@ -1405,7 +1406,18 @@ def api_health() -> Response | tuple[Response, int]:
         flask.Response: JSON with status "ok" and optional degraded features.
 
     """
-    response: dict[str, object] = {"status": "ok"}
+    from shelfmark.core import hardcover_scheduler
+
+    scheduler = hardcover_scheduler.status()
+    response: dict[str, object] = {
+        "status": "ok",
+        # What a monitor keys on: the container can be up while the sync cycle is not.
+        "scheduler": {
+            "enabled": scheduler["enabled"],
+            "healthy": scheduler["healthy"],
+            "seconds_since_last_cycle": scheduler["seconds_since_last_cycle"],
+        },
+    }
 
     # Report degraded features
     if not backend.WEBSOCKET_AVAILABLE:

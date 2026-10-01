@@ -15,6 +15,8 @@ def _isolated_scheduler(monkeypatch):
     monkeypatch.setattr(scheduler, "_ctx", {})
     monkeypatch.setattr(scheduler, "_run_lock", threading.Lock())
     monkeypatch.setattr(scheduler, "app_config", FakeConfig())
+    monkeypatch.setattr(scheduler, "_state", scheduler._new_state())
+    monkeypatch.setattr(scheduler, "_thread", None)
 
 
 def _configure(monkeypatch, **values):
@@ -207,3 +209,131 @@ class TestTriggerAsync:
         assert scheduler.trigger_async(force=force) is True
         assert finished.wait(timeout=5)
         assert seen == [{"force": force}]
+
+
+class TestStatus:
+    """What /api/stats and /api/health report about the background cycle."""
+
+    NOW = 1_000_000.0
+
+    @pytest.fixture
+    def clock(self, monkeypatch):
+        now = [self.NOW]
+        monkeypatch.setattr(scheduler, "_now", lambda: now[0])
+        monkeypatch.setattr(scheduler, "_state", scheduler._new_state())
+        return now
+
+    @pytest.fixture
+    def alive(self, monkeypatch):
+        class _Thread:
+            def is_alive(self):
+                return True
+
+        monkeypatch.setattr(scheduler, "_thread", _Thread())
+
+    @pytest.fixture
+    def stubs(self, monkeypatch):
+        results = {"sync": {"added": 2, "errors": 0}, "auto": {"queued": 1, "error": 0}}
+
+        monkeypatch.setattr(
+            "shelfmark.core.hardcover_sync.sync_wishlist", lambda *_a, **_k: results["sync"]
+        )
+
+        def _auto(*_a, **_k):
+            if isinstance(results["auto"], Exception):
+                raise results["auto"]
+            return results["auto"]
+
+        monkeypatch.setattr("shelfmark.core.auto_download.auto_download_pending", _auto)
+        scheduler.configure(_FakeUserDB(), object(), None)
+        _configure(monkeypatch, HARDCOVER_SYNC_ENABLED=True)
+        return results
+
+    def test_disabled_scheduler_is_healthy_and_says_so(self, clock):
+        status = scheduler.status()
+
+        assert status["enabled"] is False
+        assert status["healthy"] is True
+        assert status["last_cycle_at"] is None
+
+    def test_a_clean_cycle_is_recorded(self, clock, alive, stubs):
+        scheduler.run_once()
+        clock[0] += 120
+
+        status = scheduler.status()
+
+        assert status["last_cycle_errors"] == 0
+        assert status["seconds_since_last_cycle"] == 120
+        assert status["consecutive_failed_cycles"] == 0
+        assert status["healthy"] is True
+        assert status["last_cycle_at"].startswith("1970-01-12")
+
+    def test_errors_inside_a_cycle_are_counted_and_unhealthy(self, clock, alive, stubs):
+        stubs["sync"] = {"added": 0, "errors": 2}
+        stubs["auto"] = {"queued": 0, "error": 3}
+
+        scheduler.run_once()
+        status = scheduler.status()
+
+        assert status["last_cycle_errors"] == 5
+        assert status["consecutive_failed_cycles"] == 1
+        assert status["healthy"] is False
+        assert "5 error" in status["problems"][0]
+
+    def test_a_clean_cycle_resets_the_failure_streak(self, clock, alive, stubs):
+        stubs["auto"] = {"queued": 0, "error": 1}
+        scheduler.run_once()
+        scheduler.run_once()
+        assert scheduler.status()["consecutive_failed_cycles"] == 2
+
+        stubs["auto"] = {"queued": 0, "error": 0}
+        scheduler.run_once()
+
+        assert scheduler.status()["consecutive_failed_cycles"] == 0
+
+    def test_a_cycle_that_raises_is_a_failed_cycle_and_still_propagates(self, clock, alive, stubs):
+        stubs["auto"] = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            scheduler.run_once()
+        status = scheduler.status()
+
+        assert status["consecutive_failed_cycles"] == 1
+        assert status["last_cycle_errors"] == 1
+        assert status["healthy"] is False
+
+    def test_busy_and_unconfigured_runs_are_not_cycles(self, clock, alive):
+        assert scheduler.run_once() == {"status": "unconfigured"}
+
+        assert scheduler.status()["last_cycle_at"] is None
+
+    def test_overdue_after_two_intervals(self, clock, alive, stubs):
+        scheduler.run_once()
+        clock[0] += 2 * 6 * 3600 + 1
+
+        status = scheduler.status()
+
+        assert status["healthy"] is False
+        assert "no cycle" in status["problems"][0]
+
+    def test_not_yet_overdue_just_inside_two_intervals(self, clock, alive, stubs):
+        scheduler.run_once()
+        clock[0] += 2 * 6 * 3600 - 1
+
+        assert scheduler.status()["healthy"] is True
+
+    def test_a_dead_thread_is_unhealthy_when_enabled(self, clock, stubs):
+        status = scheduler.status()
+
+        assert status["thread_alive"] is False
+        assert status["healthy"] is False
+        assert any("thread" in problem for problem in status["problems"])
+
+    def test_no_cycle_yet_is_given_a_grace_period_after_startup(self, clock, alive, stubs):
+        assert scheduler.status()["healthy"] is True
+
+        clock[0] += 2 * 6 * 3600 + scheduler._WARMUP_SECONDS + 1
+
+        status = scheduler.status()
+        assert status["healthy"] is False
+        assert "no cycle" in status["problems"][0]

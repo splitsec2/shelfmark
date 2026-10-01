@@ -136,7 +136,7 @@ Optional static API key. When set, requests carrying it as 'Authorization: Beare
 
 #### `SHELFMARK_API_KEY_READONLY`
 
-Optional second API key for dashboards. Send it like `SHELFMARK_API_KEY`. It can only `GET /api/stats` (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
+Optional second API key for dashboards. Send it like `SHELFMARK_API_KEY`. It can only `GET /api/stats` (counters and scheduler health, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
 
 - **Type:** string
 - **Default:** `unset`
