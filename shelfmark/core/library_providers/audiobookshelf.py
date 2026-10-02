@@ -7,6 +7,7 @@ empty), so each item is tokenized from title + author + folder path.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -43,6 +44,10 @@ def _session(url: str, token: str) -> requests.Session:
     return session
 
 
+# "Alex Cross 02: ", "DCC 1: ", "Reacher 19.5: " - a short label, a number and a colon.
+_SERIES_PREFIX = re.compile(r"^(?P<label>[^\d:]{1,40}?)\s+(?P<number>\d+(?:\.\d+)?)\s*:\s*(?=\S)")
+
+
 def _item_to_entry(item: dict[str, Any]) -> LibraryEntry:
     media = item.get("media") or {}
     meta = media.get("metadata") or {}
@@ -50,8 +55,15 @@ def _item_to_entry(item: dict[str, Any]) -> LibraryEntry:
     author = meta.get("authorName") or ""
     rel_path = item.get("relPath") or ""
 
-    title_tok = set(tokens(title))
     context_tok = set(tokens(author))
+    # A book in a series is often titled "Alex Cross 02: Kiss the Girls" so players that
+    # ignore the series number still show the order. Those leading words name the series,
+    # not another work, so they go with the author as context.
+    prefix = _SERIES_PREFIX.match(title) if meta.get("seriesName") else None
+    if prefix:
+        context_tok |= set(tokens(f"{prefix['label']} {prefix['number']}"))
+        title = title[prefix.end() :]
+    title_tok = set(tokens(title))
     tok = title_tok | context_tok | set(tokens(rel_path))
 
     asin = str(meta.get("asin") or "").strip().upper()

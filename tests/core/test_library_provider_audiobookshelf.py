@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
+from shelfmark.core import library_index
 from shelfmark.core.library_providers import audiobookshelf
+from shelfmark.metadata_providers import BookMetadata
 from tests.core.fakes import FakeConfig
 
 pytestmark = pytest.mark.usefixtures("fake_app_config")
@@ -46,6 +48,74 @@ def test_item_to_entry_tolerates_missing_metadata() -> None:
     entry = audiobookshelf._item_to_entry({})
 
     assert (entry.tokens, entry.isbns, entry.asins) == (frozenset(), frozenset(), frozenset())
+
+
+def _searching(title: str, author: str = "James Patterson") -> BookMetadata:
+    return BookMetadata(
+        provider="hardcover",
+        provider_id="1",
+        title=title,
+        authors=[author],
+        search_title=title,
+        search_author=author,
+    )
+
+
+@pytest.mark.parametrize(
+    ("shelf_title", "series", "author", "searching"),
+    [
+        ("Alex Cross 02: Kiss the Girls", "Alex Cross #2", "James Patterson", "Kiss the Girls"),
+        ("Alex Cross 12: Cross", "Alex Cross #12", "James Patterson", "Cross"),
+        ("Alex Cross 13: Double Cross", "Alex Cross #13", "James Patterson", "Double Cross"),
+        (
+            "DCC 2: Carl's Doomsday Scenario",
+            "Dungeon Crawler Carl #2",
+            "Matt Dinniman",
+            "Carl's Doomsday Scenario",
+        ),
+        ("Reacher 19: Personal", "Jack Reacher #19", "Lee Child", "Personal"),
+        ("Reacher 01: Killing Floor", "Jack Reacher #1", "Lee Child", "Killing Floor"),
+    ],
+)
+def test_a_series_number_in_the_shelf_title_does_not_hide_the_book(
+    shelf_title: str, series: str, author: str, searching: str
+) -> None:
+    entry = audiobookshelf._item_to_entry(_item(shelf_title, author, seriesName=series))
+
+    assert library_index.match_entries(_searching(searching, author), [entry]) == "owned"
+
+
+def test_a_search_title_that_carries_the_series_words_still_matches() -> None:
+    """Metadata sources often title the same book "Kiss the Girls: Alex Cross"."""
+    entry = audiobookshelf._item_to_entry(
+        _item("Alex Cross 02: Kiss the Girls", "James Patterson", seriesName="Alex Cross #2")
+    )
+
+    assert library_index.match_entries(_searching("Kiss the Girls: Alex Cross"), [entry]) == "owned"
+
+
+def test_a_numbered_shelf_title_still_does_not_match_a_different_book() -> None:
+    entry = audiobookshelf._item_to_entry(
+        _item("Alex Cross 02: Kiss the Girls", "James Patterson", seriesName="Alex Cross #2")
+    )
+
+    assert library_index.match_entries(_searching("Along Came a Spider"), [entry]) is None
+    # A shorter search title is still a different book, as with "Dune" and "Dune Messiah".
+    assert library_index.match_entries(_searching("Cross"), [entry]) is None
+
+
+def test_a_number_before_a_colon_is_only_a_series_label_when_abs_reports_a_series() -> None:
+    entry = audiobookshelf._item_to_entry(_item("Apollo 13: The Movie", "Someone"))
+
+    assert library_index.match_entries(_searching("The Movie", "Someone"), [entry]) is None
+
+
+def test_a_plain_shelf_title_is_unchanged_by_the_series_handling() -> None:
+    entry = audiobookshelf._item_to_entry(
+        _item("Kiss the Girls", "James Patterson", seriesName="Alex Cross #2")
+    )
+
+    assert library_index.match_entries(_searching("Kiss the Girls"), [entry]) == "owned"
 
 
 class _Response:
