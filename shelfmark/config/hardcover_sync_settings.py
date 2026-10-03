@@ -203,6 +203,19 @@ def hardcover_sync_settings() -> list[SettingsField]:
             max_value=1000,
         ),
         NumberField(
+            key="AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT",
+            label="Smallest acceptable audiobook copy (%)",
+            description=(
+                "A copy of an audiobook smaller than this share of the largest copy found for "
+                "the same book is probably a lower-bitrate copy. It is tried after the others, "
+                "and a single m4b that small is not preferred over a fuller set of chapter "
+                "files. 0 turns the check off."
+            ),
+            default=67,
+            min_value=0,
+            max_value=100,
+        ),
+        NumberField(
             key="AUTO_DOWNLOAD_RETRY_DAYS",
             label="Retry failed downloads after (days)",
             description=(
