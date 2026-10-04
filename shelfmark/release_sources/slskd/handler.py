@@ -493,6 +493,9 @@ class SlskdHandler(DownloadHandler):
             local_paths = self._wait_for_files(root, spec, cancel_flag, status_callback)
             if local_paths is None:
                 if cancel_flag.is_set():
+                    # The transfers finished, so nothing is left to stop, but their records
+                    # (and the transfer ids) would stay in slskd's list for good.
+                    self._cancel_transfers(client, spec, remove=True)
                     status_callback("cancelled", "Cancelled")
                 return None
 

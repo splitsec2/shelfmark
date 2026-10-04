@@ -694,3 +694,28 @@ class TestCleanup:
         _fake, task, _path = self._completed(fast_handler, config_values, tmp_path)
         assert fast_handler.cancel(task.task_id) is True
         assert task.task_id not in fast_handler._cleanup_refs
+
+
+class TestCancelWhileLocatingFiles:
+    def test_a_cancel_after_the_transfers_finished_still_removes_their_records(
+        self, fast_handler, config_values, tmp_path
+    ):
+        config_values["SLSKD_DOWNLOAD_PATH"] = str(tmp_path)
+        cancel = Event()
+        finished = [_transfer(FILE_A, "Completed, Succeeded", transferred=1000, tid="t0")]
+
+        class Fake(FakeSlskd):
+            def list_downloads(self, username):
+                result = super().list_downloads(username)
+                cancel.set()  # the cancel lands as the last transfer is reported finished
+                return result
+
+        fake = Fake(polls=[finished])
+        _mount(fast_handler, fake)
+        rec = ProgressRecorder()
+
+        result = fast_handler.download(_task(), cancel, rec.progress_callback, rec.status_callback)
+
+        assert result is None
+        assert rec.last_status == "cancelled"
+        assert ("peer", "t0", True) in fake.cancelled
