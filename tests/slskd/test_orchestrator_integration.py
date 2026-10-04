@@ -3,10 +3,22 @@
 from pathlib import Path
 from threading import Event
 
+import pytest
+
 from shelfmark.core.models import DownloadTask
 from shelfmark.download import orchestrator
 from shelfmark.release_sources import get_handler
 from shelfmark.release_sources.slskd.handler import SlskdHandler, spec_from_task
+
+
+@pytest.fixture(autouse=True)
+def _original_enqueue_path(monkeypatch):
+    """These tests cover the original enqueue-and-poll-the-list path; isolated mode has its own
+    tests in test_handler_isolated.py."""
+    from shelfmark.release_sources.slskd.handler import SlskdHandler
+
+    monkeypatch.setattr(SlskdHandler, "_isolate_enabled", lambda self: False)
+
 
 FILE = "@@share\\Books\\Author\\Book.epub"
 

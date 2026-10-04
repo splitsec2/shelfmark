@@ -8,7 +8,10 @@ too (a shared volume), either at the same path, at the path configured in
 
 from __future__ import annotations
 
+import json
 import math
+import re
+import shutil
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -23,6 +26,7 @@ from shelfmark.core.path_mappings import (
     parse_remote_path_mappings,
     remap_remote_to_local_with_match,
 )
+from shelfmark.download.activity import release_activity_grace, request_activity_grace
 from shelfmark.download.clients.base_handler import (
     COMPLETED_PATH_MAX_ATTEMPTS as _DEFAULT_COMPLETED_PATH_MAX_ATTEMPTS,
 )
@@ -37,6 +41,7 @@ from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.packs import PackFile
 from shelfmark.release_sources import DownloadHandler, register_handler
 from shelfmark.release_sources.slskd.api import (
+    SlskdBatchUnsupportedError,
     SlskdClient,
     SlskdError,
     transfer_is_complete,
@@ -68,6 +73,13 @@ PATH_MAPPING_HOST = "slskd"
 CANCEL_REMOVE_PASSES = 3
 CANCEL_REMOVE_INTERVAL = 0.5
 _BYTES_PER_MB = 1024 * 1024
+# Isolated mode: while a peer holds the files in its queue nothing changes, so the orchestrator's
+# stall timer would cancel the download. Ask for a grace instead, renewed while still queued
+# (the orchestrator caps a single grace), and let the peer queue timeout decide when to give up.
+QUEUE_GRACE_SECONDS = 900.0
+QUEUE_GRACE_RENEW_SECONDS = 600.0
+DEFAULT_DESTINATION_PREFIX = "shelfmark"
+_USE_ORIGINAL_ENQUEUE = object()  # sentinel: this slskd has no batch endpoint
 _SECONDS_PER_MINUTE = 60
 
 _SLSKD_ERRORS = (requests.exceptions.RequestException, SlskdError, ValueError, TypeError)
@@ -263,6 +275,88 @@ def _progress_message(snap: _TransferSnapshot, spec: SlskdDownloadSpec, percent:
     return "Waiting for peer"
 
 
+def _bool_setting(key: str, default: bool) -> bool:
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _safe_name(value: str) -> str:
+    """A task id as one path component: letters, digits, dot, dash and underscore only."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value or "").strip("._") or "download"
+
+
+def _clean_prefix(raw: object) -> str:
+    """The folder, relative to slskd's downloads folder, that holds Shelfmark's downloads."""
+    text = str(raw or "").strip().replace("\\", "/").strip("/")
+    parts = [p for p in text.split("/") if p]
+    if not parts or any(p in {".", ".."} or re.match(r"^[A-Za-z]:", p) for p in parts):
+        return DEFAULT_DESTINATION_PREFIX
+    return "/".join(_safe_name(p) for p in parts)
+
+
+def _folder_files(folder: Path) -> list[Path]:
+    """The finished files directly inside ``folder`` (hidden and partial files are not)."""
+    try:
+        if not run_blocking_io(folder.is_dir):
+            return []
+        return [
+            p
+            for p in run_blocking_io(lambda: list(folder.iterdir()))
+            if not p.name.startswith(".") and run_blocking_io(p.is_file)
+        ]
+    except OSError:
+        return []
+
+
+def _folder_complete(folder: Path, expected_sizes: list[int]) -> bool:
+    """True when the folder holds exactly the files that were asked for.
+
+    Names are not compared, only sizes: slskd may rename a file that already exists, but it
+    cannot change its size. A size of 0 means the peer did not say, so only the count is
+    checked then.
+    """
+    files = _folder_files(folder)
+    if not files or not expected_sizes or len(files) != len(expected_sizes):
+        return False
+    if any(size <= 0 for size in expected_sizes):
+        return True
+    try:
+        actual = sorted(run_blocking_io(lambda p=p: p.stat().st_size) for p in files)
+    except OSError:
+        return False
+    return actual == sorted(expected_sizes)
+
+
+def _completed_remote_files(events: list[dict[str, Any]]) -> set[str]:
+    """Remote filenames slskd's stored events say finished downloading."""
+    done: set[str] = set()
+    for event in events:
+        if "downloadfilecomplete" not in str(event.get("type") or "").lower():
+            continue
+        data = event.get("data")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                continue
+        if not isinstance(data, dict):
+            continue
+        raw_transfer = data.get("transfer")
+        transfer = raw_transfer if isinstance(raw_transfer, dict) else {}
+        name = data.get("remoteFilename") or data.get("RemoteFilename") or transfer.get("filename")
+        if name:
+            done.add(str(name))
+    return done
+
+
 @register_handler(SOURCE_NAME)
 class SlskdHandler(DownloadHandler):
     """Download a Soulseek release through slskd."""
@@ -270,6 +364,7 @@ class SlskdHandler(DownloadHandler):
     def __init__(self) -> None:
         # task_id -> (client, username, transfer ids, local paths) for post-import cleanup
         self._cleanup_refs: dict[str, tuple[SlskdClient, str, list[str], list[Path]]] = {}
+        self._isolated_refs: dict[str, tuple[SlskdClient, str, list[str], Path]] = {}
 
     # ── queue-time hooks ──────────────────────────────────────────────────────
 
@@ -327,7 +422,7 @@ class SlskdHandler(DownloadHandler):
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
     ) -> str | None:
-        """Enqueue the release in slskd, wait for it, and return the completed path."""
+        """Download a release through slskd and return the folder holding its files."""
         if cancel_flag.is_set():
             status_callback("cancelled", "Cancelled")
             return None
@@ -343,6 +438,31 @@ class SlskdHandler(DownloadHandler):
             status_callback("error", "slskd is not configured")
             return None
 
+        if self._isolate_enabled():
+            outcome = self._download_isolated(
+                task, spec, client, cancel_flag, progress_callback, status_callback
+            )
+            if outcome is not _USE_ORIGINAL_ENQUEUE:
+                return outcome  # type: ignore[return-value]
+            logger.info("slskd has no batch endpoint; using the plain enqueue")
+        return self._download_original(
+            task, spec, client, cancel_flag, progress_callback, status_callback
+        )
+
+    def _download_original(
+        self,
+        task: DownloadTask,
+        spec: SlskdDownloadSpec,
+        client: SlskdClient,
+        cancel_flag: Event,
+        progress_callback: Callable[[float], None],
+        status_callback: Callable[[str, str | None], None],
+    ) -> str | None:
+        """Enqueue the release in slskd, wait for it, and return the completed path.
+
+        The original behaviour: slskd lays the files out under its downloads folder by the
+        peer's last folder name, and the list of transfers is what is polled.
+        """
         transfer_ids: list[str] = []
         try:
             status_callback("resolving", "Sending to slskd")
@@ -565,9 +685,346 @@ class SlskdHandler(DownloadHandler):
         logger.debug("slskd download staged %d files into %s", len(local_paths), staging_dir)
         return str(staging_dir)
 
+    # ── isolated mode ─────────────────────────────────────────────────────────
+    #
+    # Several apps can share one slskd and any of them may clear its list of finished
+    # transfers, so this path never depends on that list. Each download gets a folder of its
+    # own (a batch with a relative destination), every transfer is read by its id, and the
+    # files on disk decide whether it finished. The finished files stay where slskd put them
+    # (still shared); the orchestrator copies them out because the folder is the client's.
+
+    def _isolate_enabled(self) -> bool:
+        return _bool_setting("SLSKD_ISOLATE_DOWNLOADS", True)
+
+    def _keep_completed(self) -> bool:
+        return _bool_setting("SLSKD_KEEP_COMPLETED", True)
+
+    def _destination_for(self, task: DownloadTask) -> str:
+        prefix = _clean_prefix(config.get("SLSKD_DESTINATION_PREFIX", DEFAULT_DESTINATION_PREFIX))
+        return f"{prefix}/{_safe_name(task.task_id)}"
+
+    def _clock(self) -> float:
+        return time.monotonic()
+
+    def _download_isolated(
+        self,
+        task: DownloadTask,
+        spec: SlskdDownloadSpec,
+        client: SlskdClient,
+        cancel_flag: Event,
+        progress_callback: Callable[[float], None],
+        status_callback: Callable[[str, str | None], None],
+    ) -> object:
+        """Run the download in a folder of its own. Returns the folder path, None on failure,
+        or ``_USE_ORIGINAL_ENQUEUE`` when slskd has no batch endpoint."""
+        root, root_error = resolve_local_download_root(client)
+        if root is None:
+            status_callback("error", root_error or "Could not locate slskd downloads")
+            return None
+        destination = self._destination_for(task)
+        folder = root.joinpath(*destination.split("/"))
+        expected = [int(f.get("size") or 0) for f in spec.files]
+
+        # A restart or retry finds the files already there: nothing to download again.
+        if _folder_complete(folder, expected):
+            logger.info("slskd: %s already holds the files for %s", folder, task.task_id)
+            progress_callback(100.0)
+            return self._finish_isolated(task, client, spec.username, [], folder)
+
+        status_callback("resolving", "Sending to slskd")
+        try:
+            batch = client.enqueue_batch(spec.username, spec.files, destination)
+        except SlskdBatchUnsupportedError:
+            return _USE_ORIGINAL_ENQUEUE
+        except _SLSKD_ERRORS as e:
+            logger.exception("Failed to enqueue slskd batch")
+            status_callback("error", f"Failed to add to slskd: {e}")
+            return None
+
+        ids = {
+            str(t.get("filename") or ""): str(t["id"])
+            for t in batch["transfers"]
+            if t.get("id") and t.get("filename")
+        }
+        failures = batch["failures"]
+        if failures:
+            ids, unresolved = self._rejoin_refused(client, spec, ids, failures)
+            if unresolved:
+                first = unresolved[0].get("message") or "unknown reason"
+                status_callback("error", f"slskd refused {len(unresolved)} file(s): {first}")
+                self._cancel_ids(client, spec.username, list(ids.values()))
+                return None
+        if not ids:
+            status_callback("error", "slskd did not queue any of the files")
+            return None
+
+        return self._poll_isolated(
+            task,
+            spec,
+            client,
+            ids,
+            folder,
+            expected,
+            cancel_flag,
+            progress_callback,
+            status_callback,
+        )
+
+    def _rejoin_refused(
+        self,
+        client: SlskdClient,
+        spec: SlskdDownloadSpec,
+        ids: dict[str, str],
+        failures: list[dict[str, Any]],
+    ) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        """slskd refuses a file it already has queued or running. Find that transfer by name
+        in the peer's list and join it instead of failing. The list is only used here, to
+        discover an id; progress is always read by id."""
+        try:
+            listed = client.list_downloads(spec.username)
+        except _SLSKD_ERRORS:
+            listed = []
+        by_name = {
+            str(t.get("filename") or ""): str(t["id"])
+            for t in listed
+            if t.get("id") and not t.get("removed")
+        }
+        unresolved: list[dict[str, Any]] = []
+        joined = dict(ids)
+        for failure in failures:
+            name = str(failure.get("filename") or "")
+            if name in by_name:
+                joined[name] = by_name[name]
+            else:
+                unresolved.append(failure)
+        return joined, unresolved
+
+    def _poll_isolated(
+        self,
+        task: DownloadTask,
+        spec: SlskdDownloadSpec,
+        client: SlskdClient,
+        ids: dict[str, str],
+        folder: Path,
+        expected: list[int],
+        cancel_flag: Event,
+        progress_callback: Callable[[float], None],
+        status_callback: Callable[[str, str | None], None],
+    ) -> str | None:
+        poll_interval = self._poll_interval()
+        queue_timeout = self._queue_timeout_seconds()
+        started = self._clock()
+        grace_at: float | None = None
+        missing_polls = 0
+        sizes = {str(f.get("filename") or ""): int(f.get("size") or 0) for f in spec.files}
+        total = sum(sizes.values())
+        transfer_ids = list(ids.values())
+
+        try:
+            while not cancel_flag.is_set():
+                now = self._clock()
+                records: dict[str, dict[str, Any] | None] = {}
+                try:
+                    for name, transfer_id in ids.items():
+                        records[name] = client.get_transfer(spec.username, transfer_id)
+                except _SLSKD_ERRORS as e:
+                    logger.warning("slskd status check failed: %s", e)
+                    status_callback("resolving", "Waiting for slskd...")
+                    if cancel_flag.wait(timeout=poll_interval):
+                        break
+                    continue
+
+                present = {n: r for n, r in records.items() if r is not None}
+                gone = [n for n, r in records.items() if r is None]
+                failed = [
+                    (n, r)
+                    for n, r in present.items()
+                    if transfer_is_complete(r.get("state"))
+                    and not transfer_succeeded(r.get("state"))
+                ]
+                if failed:
+                    name, record = failed[0]
+                    outcome = str(record.get("state") or "").split(",", 1)[-1].strip()
+                    message = f"Peer transfer failed: {outcome or record.get('state')}"
+                    if len(spec.files) > 1:
+                        message += f" ({split_remote_path(name)[1]})"
+                    logger.error(
+                        "slskd transfer failed for %s: %s", task.task_id, record.get("state")
+                    )
+                    status_callback("error", message)
+                    self._cancel_ids(client, spec.username, transfer_ids)
+                    return None
+
+                active = {
+                    n: r for n, r in present.items() if not transfer_succeeded(r.get("state"))
+                }
+                done_bytes = sum(
+                    sizes.get(n, 0) if n not in active else int(r.get("bytesTransferred") or 0)
+                    for n, r in present.items()
+                ) + sum(sizes.get(n, 0) for n in gone)
+                percent = max(0.0, min(100.0, (done_bytes / total * 100) if total > 0 else 0.0))
+
+                queued = [r for r in active.values() if self._is_queued(r.get("state"))]
+                if queued and (grace_at is None or now - grace_at >= QUEUE_GRACE_RENEW_SECONDS):
+                    request_activity_grace(status_callback, QUEUE_GRACE_SECONDS)
+                    grace_at = now
+                elif not queued and grace_at is not None:
+                    release_activity_grace(status_callback)
+                    grace_at = None
+
+                if not active:
+                    # Every transfer succeeded or slskd no longer lists it: the files decide.
+                    if _folder_complete(folder, expected):
+                        progress_callback(100.0)
+                        return self._finish_isolated(
+                            task, client, spec.username, transfer_ids, folder
+                        )
+                    missing_polls += 1
+                    if missing_polls >= MAX_MISSING_POLLS:
+                        return self._confirm_by_events(
+                            task,
+                            spec,
+                            client,
+                            gone,
+                            folder,
+                            expected,
+                            transfer_ids,
+                            cancel_flag,
+                            progress_callback,
+                            status_callback,
+                        )
+                    status_callback("locating", "Waiting for completed files...")
+                else:
+                    missing_polls = 0
+                    progress_callback(percent)
+                    if queue_timeout > 0 and done_bytes == 0 and now - started > queue_timeout:
+                        minutes = int(queue_timeout // _SECONDS_PER_MINUTE)
+                        status_callback(
+                            "error", f"Peer did not start the transfer within {minutes} minutes"
+                        )
+                        self._cancel_ids(client, spec.username, transfer_ids)
+                        return None
+                    status_callback("downloading", self._isolated_message(active, spec, percent))
+
+                if cancel_flag.wait(timeout=poll_interval):
+                    break
+
+            self._cancel_ids(client, spec.username, transfer_ids)
+            status_callback("cancelled", "Cancelled")
+            return None
+        finally:
+            if grace_at is not None:
+                release_activity_grace(status_callback)
+
+    @staticmethod
+    def _is_queued(state: object) -> bool:
+        text = str(state or "").lower()
+        return "queued" in text or "requested" in text
+
+    @staticmethod
+    def _isolated_message(
+        active: dict[str, dict[str, Any]], spec: SlskdDownloadSpec, percent: float
+    ) -> str:
+        running = [r for r in active.values() if str(r.get("state") or "").startswith("InProgress")]
+        if running:
+            speed = sum(float(r.get("averageSpeed") or 0) for r in running)
+            msg = f"{percent:.0f}%"
+            if speed > 0:
+                msg += f" ({speed / _BYTES_PER_MB:.1f} MB/s)"
+            if len(spec.files) > 1:
+                msg += f" - {len(running)} of {len(spec.files)} files transferring"
+            return msg
+        positions = [
+            int(r["placeInQueue"])
+            for r in active.values()
+            if isinstance(r.get("placeInQueue"), int) and r["placeInQueue"] > 0
+        ]
+        if positions:
+            return f"Queued at peer (position {min(positions)})"
+        return "Queued at peer"
+
+    def _confirm_by_events(
+        self,
+        task: DownloadTask,
+        spec: SlskdDownloadSpec,
+        client: SlskdClient,
+        gone: list[str],
+        folder: Path,
+        expected: list[int],
+        transfer_ids: list[str],
+        cancel_flag: Event,
+        progress_callback: Callable[[float], None],
+        status_callback: Callable[[str, str | None], None],
+    ) -> str | None:
+        """The transfers vanished and the files are not all here yet. slskd's stored events
+        outlive anyone clearing the list: if they say the files finished, wait for them to
+        appear; if they do not, the transfer really is lost."""
+        try:
+            finished = _completed_remote_files(client.get_events(limit=200))
+        except _SLSKD_ERRORS:
+            finished = set()
+        if gone and all(name in finished for name in gone):
+            retry_interval = self._completed_path_retry_interval()
+            timeout = self._completed_path_timeout_seconds()
+            attempts = (
+                1
+                if retry_interval <= 0 or timeout <= 0
+                else int(math.ceil(timeout / retry_interval)) + 1
+            )
+            for attempt in range(1, attempts + 1):
+                if cancel_flag.is_set():
+                    status_callback("cancelled", "Cancelled")
+                    return None
+                if _folder_complete(folder, expected):
+                    progress_callback(100.0)
+                    return self._finish_isolated(task, client, spec.username, transfer_ids, folder)
+                if attempt < attempts:
+                    status_callback("locating", "Waiting for completed files...")
+                    if cancel_flag.wait(timeout=retry_interval):
+                        status_callback("cancelled", "Cancelled")
+                        return None
+        logger.error(
+            "slskd transfers for %s vanished and the files are not in %s", task.task_id, folder
+        )
+        status_callback(
+            "error",
+            "Transfer disappeared from slskd and its files were not found in "
+            f"'{folder}'. Check that slskd's downloads folder is mounted into Shelfmark.",
+        )
+        return None
+
+    def _finish_isolated(
+        self,
+        task: DownloadTask,
+        client: SlskdClient,
+        username: str,
+        transfer_ids: list[str],
+        folder: Path,
+    ) -> str:
+        task.original_download_path = str(folder)
+        self._isolated_refs[task.task_id] = (client, username, transfer_ids, folder)
+        logger.debug("slskd download complete: %s", folder)
+        return str(folder)
+
+    def _cancel_ids(self, client: SlskdClient, username: str, transfer_ids: list[str]) -> None:
+        """Cancel transfers and drop their records. slskd removes only a completed record, so a
+        live transfer needs a second pass once the cancellation has landed."""
+        for attempt in range(CANCEL_REMOVE_PASSES):
+            for transfer_id in transfer_ids:
+                try:
+                    client.cancel_transfer(username, transfer_id, remove=True)
+                except _SLSKD_ERRORS as e:
+                    logger.warning("Failed to cancel slskd transfer %s: %s", transfer_id, e)
+            if attempt + 1 < CANCEL_REMOVE_PASSES:
+                self._cancel_remove_wait()
+
     # ── after post-processing ─────────────────────────────────────────────────
 
     def post_process_cleanup(self, task: DownloadTask, *, success: bool) -> None:
+        isolated = self._isolated_refs.pop(task.task_id, None)
+        if isolated is not None:
+            self._cleanup_isolated(isolated, success=success)
+            return
         refs = self._cleanup_refs.pop(task.task_id, None)
         if refs is None or not success:
             return
@@ -589,8 +1046,29 @@ class SlskdHandler(DownloadHandler):
             except OSError as e:
                 logger.debug("Could not remove empty slskd folder %s: %s", parent, e)
 
+    def _cleanup_isolated(
+        self, refs: tuple[SlskdClient, str, list[str], Path], *, success: bool
+    ) -> None:
+        """After the orchestrator copied the files out. By default everything stays in slskd,
+        so the files remain shared; with ``SLSKD_KEEP_COMPLETED`` off the records and the
+        folder are removed. A failed import leaves it all for a retry."""
+        client, username, transfer_ids, folder = refs
+        if not success or self._keep_completed():
+            return
+        for transfer_id in transfer_ids:
+            try:
+                client.cancel_transfer(username, transfer_id, remove=True)
+            except _SLSKD_ERRORS as e:
+                logger.debug("Failed to remove slskd transfer %s: %s", transfer_id, e)
+        try:
+            if run_blocking_io(folder.is_dir):
+                run_blocking_io(lambda: shutil.rmtree(folder))
+        except OSError as e:
+            logger.debug("Could not remove slskd folder %s: %s", folder, e)
+
     def cancel(self, task_id: str) -> bool:
         """Cancellation is driven by the queue's cancel flag inside ``download``."""
         logger.debug("Cancel requested for slskd task: %s", task_id)
         self._cleanup_refs.pop(task_id, None)
+        self._isolated_refs.pop(task_id, None)
         return True
