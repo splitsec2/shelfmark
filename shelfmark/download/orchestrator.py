@@ -24,7 +24,7 @@ from shelfmark.core.request_helpers import (
 )
 from shelfmark.core.utils import is_audiobook as check_audiobook
 from shelfmark.core.utils import transform_cover_url
-from shelfmark.download.activity import parse_activity_grace
+from shelfmark.download.activity import STALL_TIMEOUT_SECONDS, parse_activity_grace
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.pipeline import is_torrent_source, safe_cleanup_path
 from shelfmark.download.postprocess.router import post_process_download
@@ -69,7 +69,7 @@ _last_activity: dict[str, float] = {}
 _last_progress_value: dict[str, float] = {}
 # De-duplicate status updates (keep-alive updates shouldn't spam clients)
 _last_status_event: dict[str, tuple[str, str | None]] = {}
-STALL_TIMEOUT = 300  # 5 minutes without progress/status update = stalled
+STALL_TIMEOUT = STALL_TIMEOUT_SECONDS  # 5 minutes without progress/status update = stalled
 # Absolute deadlines (time.time()) until which stall detection is suppressed for a task.
 # Long single-shot operations (protection bypass, etc.) declare their own upper bound via
 # `shelfmark.download.activity` instead of faking progress. See set_activity_grace().

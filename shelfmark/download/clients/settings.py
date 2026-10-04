@@ -18,6 +18,7 @@ from shelfmark.core.settings_registry import (
     register_settings,
 )
 from shelfmark.core.utils import get_hardened_xmlrpc_client, normalize_http_url
+from shelfmark.download.activity import STALL_TIMEOUT_SECONDS
 from shelfmark.download.network import get_ssl_verify
 
 try:
@@ -608,7 +609,7 @@ def _test_torbox_connection(current_values: dict[str, Any] | None = None) -> dic
 # Torrent stall window (see ExternalClientHandler._stall_window_seconds).
 STALL_TIMEOUT_SETTING = "TORRENT_STALL_TIMEOUT_MINUTES"
 STALL_TIMEOUT_DEFAULT_MINUTES = 15
-STALL_TIMEOUT_MIN_MINUTES = 5  # the orchestrator's STALL_TIMEOUT; a shorter window cannot apply
+STALL_TIMEOUT_MIN_MINUTES = STALL_TIMEOUT_SECONDS // 60  # a shorter window cannot apply
 STALL_TIMEOUT_MAX_MINUTES = 60
 
 
