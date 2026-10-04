@@ -46,6 +46,7 @@ def _poll(
     clock: list[float] | None = None,
     *,
     minutes: object = 15,
+    protocol: str = "torrent",
 ) -> _Recorder:
     """Run the poll loop over a scripted list of client statuses, then cancel."""
     cancel = Event()
@@ -81,7 +82,7 @@ def _poll(
         ProwlarrHandler()._poll_and_complete(
             client,
             "hash",
-            "torrent",
+            protocol,
             DownloadTask(task_id="t", source="prowlarr", title="Book"),
             cancel,
             lambda _p: None,
@@ -296,3 +297,17 @@ def test_a_requeued_torrent_follows_the_setting_when_it_leaves_the_queue() -> No
     rec = _poll([_status(D, 1.0), _status(Q, 1.0), _status(D, 1.0)], minutes=30)
 
     assert rec.graces == [1800.0, bh.QUEUE_GRACE_SECONDS, 0.0, 1800.0]
+
+
+def test_usenet_does_not_get_the_torrent_stall_window() -> None:
+    rec = _poll([_status(D, 1.0), _status(D, 2.0), _status(D, 0.0)], minutes=30, protocol="usenet")
+
+    assert rec.graces == []
+
+
+def test_the_minimum_window_is_derived_from_the_orchestrators_timeout() -> None:
+    from shelfmark.download import orchestrator
+    from shelfmark.download.activity import STALL_TIMEOUT_SECONDS
+
+    assert orchestrator.STALL_TIMEOUT == STALL_TIMEOUT_SECONDS
+    assert bh.STALL_TIMEOUT_MIN_MINUTES * 60 == STALL_TIMEOUT_SECONDS

@@ -1010,7 +1010,13 @@ class ExternalClientHandler(DownloadHandler, ABC):
         grace_requested_at: float | None = None
         last_progress = 0.0
         start_window_given = False
-        stall_window = self._stall_window_seconds()
+        # The setting is for torrents. Usenet keeps the orchestrator's own timeout, which is
+        # the floor of the setting, so no window is requested for it.
+        stall_window = (
+            self._stall_window_seconds()
+            if protocol == "torrent"
+            else float(STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE)
+        )
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
