@@ -326,7 +326,8 @@ class SlskdClient:
             raise
         data = self._json(response)
         data = data if isinstance(data, dict) else {}
-        batch = data.get("batch") if isinstance(data.get("batch"), dict) else {}
+        raw_batch = data.get("batch")
+        batch = raw_batch if isinstance(raw_batch, dict) else {}
         failures = data.get("failures")
         return {
             "batch_id": str(batch.get("id") or ""),
