@@ -488,3 +488,51 @@ class TestCleanup:
 
         assert fake.cancelled == []
         assert (tmp_path / "shelfmark" / "slskd_abc").is_dir()
+
+
+class TestFolderComplete:
+    def _folder(self, tmp_path, files):
+        folder = tmp_path / "f"
+        folder.mkdir()
+        for name, size in files.items():
+            (folder / name).write_bytes(b"x" * size)
+        return folder
+
+    def test_the_files_asked_for_are_complete(self, tmp_path):
+        folder = self._folder(tmp_path, {"a.epub": 5, "b.epub": 7})
+
+        assert mod._folder_complete(folder, [5, 7]) is True
+
+    def test_a_file_of_the_wrong_size_is_not_complete(self, tmp_path):
+        # the right number of files, but one is a partial copy
+        folder = self._folder(tmp_path, {"a.epub": 5, "b.epub": 3})
+
+        assert mod._folder_complete(folder, [5, 7]) is False
+
+    def test_names_do_not_matter_because_slskd_may_rename_a_duplicate(self, tmp_path):
+        folder = self._folder(tmp_path, {"a_1.epub": 5, "totally different.epub": 7})
+
+        assert mod._folder_complete(folder, [7, 5]) is True
+
+    def test_too_few_or_too_many_files_is_not_complete(self, tmp_path):
+        assert mod._folder_complete(self._folder(tmp_path, {"a.epub": 5}), [5, 7]) is False
+        other = tmp_path / "g"
+        other.mkdir()
+        for name, size in {"a": 5, "b": 7, "c": 1}.items():
+            (other / name).write_bytes(b"x" * size)
+        assert mod._folder_complete(other, [5, 7]) is False
+
+    def test_hidden_and_missing_folders_hold_nothing(self, tmp_path):
+        folder = self._folder(tmp_path, {".part": 5})
+
+        assert mod._folder_complete(folder, [5]) is False
+        assert mod._folder_complete(tmp_path / "nope", [5]) is False
+
+    def test_an_unknown_size_is_checked_by_count_only(self, tmp_path):
+        folder = self._folder(tmp_path, {"a.epub": 5, "b.epub": 9})
+
+        assert mod._folder_complete(folder, [0, 0]) is True
+        assert mod._folder_complete(folder, [0]) is False
+
+    def test_nothing_asked_for_is_never_complete(self, tmp_path):
+        assert mod._folder_complete(self._folder(tmp_path, {"a": 1}), []) is False
