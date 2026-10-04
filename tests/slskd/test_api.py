@@ -7,6 +7,7 @@ import requests
 
 from shelfmark.release_sources.slskd.api import (
     SlskdAuthError,
+    SlskdBatchUnsupportedError,
     SlskdClient,
     SlskdError,
     _flatten_transfers,
@@ -389,3 +390,98 @@ class TestHelpers:
     def test_state_predicates(self, state, complete, succeeded):
         assert transfer_is_complete(state) is complete
         assert transfer_succeeded(state) is succeeded
+
+
+# ── batch downloads, batches by id, events (fork additions) ─────────────────────
+
+
+class TestBatchDownloads:
+    def _client(self):
+        return SlskdClient("http://slskd:5030", "key")
+
+    def test_enqueue_batch_posts_files_into_a_relative_destination(self):
+        client = self._client()
+        reply = {
+            "batch": {
+                "id": "b-1",
+                "transfers": [{"id": "t1", "filename": "a.epub", "state": "Requested"}],
+            },
+            "failures": [],
+        }
+        with patch.object(
+            client._session, "request", return_value=_make_response(reply, 201)
+        ) as request:
+            result = client.enqueue_batch(
+                "peer", [{"filename": "a.epub", "size": 7}], "shelfmark/task-1"
+            )
+
+        _, url = request.call_args.args[:2]
+        assert url.endswith("/api/v0/transfers/downloads/batches")
+        assert request.call_args.kwargs["json"] == {
+            "username": "peer",
+            "files": [{"filename": "a.epub", "size": 7}],
+            "options": {"destination": "shelfmark/task-1"},
+        }
+        assert result["batch_id"] == "b-1"
+        assert [t["id"] for t in result["transfers"]] == ["t1"]
+        assert result["failures"] == []
+
+    def test_enqueue_batch_returns_the_files_slskd_refused(self):
+        client = self._client()
+        reply = {
+            "batch": {"id": "b-1", "transfers": []},
+            "failures": [{"filename": "a.epub", "message": "already queued"}],
+        }
+        with patch.object(client._session, "request", return_value=_make_response(reply, 207)):
+            result = client.enqueue_batch("peer", [{"filename": "a.epub", "size": 7}], "d")
+
+        assert result["failures"] == [{"filename": "a.epub", "message": "already queued"}]
+
+    @pytest.mark.parametrize("status", [404, 405])
+    def test_a_slskd_without_the_batch_endpoint_is_reported_as_unsupported(self, status):
+        client = self._client()
+        with (
+            patch.object(client._session, "request", return_value=_make_response(status=status)),
+            pytest.raises(SlskdBatchUnsupportedError),
+        ):
+            client.enqueue_batch("peer", [{"filename": "a.epub", "size": 7}], "d")
+
+    def test_other_enqueue_errors_are_not_mistaken_for_an_old_slskd(self):
+        client = self._client()
+        with (
+            patch.object(client._session, "request", return_value=_make_response(status=400)),
+            pytest.raises(requests.exceptions.HTTPError),
+        ):
+            client.enqueue_batch("peer", [{"filename": "a.epub", "size": 7}], "d")
+
+    def test_get_batch_returns_the_batch_and_none_when_it_is_gone(self):
+        client = self._client()
+        body = {"id": "b-1", "transfers": [{"id": "t1"}]}
+        with patch.object(
+            client._session,
+            "request",
+            side_effect=[_make_response(body), _make_response(status=404)],
+        ) as request:
+            found = client.get_batch("b-1")
+            gone = client.get_batch("b-2")
+
+        assert request.call_args_list[0].args[1].endswith("/transfers/downloads/batches/b-1")
+        assert found == body
+        assert gone is None
+
+    def test_get_events_reads_the_newest_events(self):
+        client = self._client()
+        events = [{"type": "DownloadFileComplete", "data": "{}"}]
+        with patch.object(
+            client._session, "request", return_value=_make_response(events)
+        ) as request:
+            got = client.get_events(limit=50)
+
+        assert got == events
+        assert request.call_args.args[1].endswith("/api/v0/events")
+        assert request.call_args.kwargs["params"] == {"offset": 0, "limit": 50}
+
+    def test_get_events_tolerates_a_slskd_without_the_endpoint(self):
+        client = self._client()
+        with patch.object(client._session, "request", return_value=_make_response(status=404)):
+            assert client.get_events() == []
