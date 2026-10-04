@@ -19,6 +19,16 @@ from shelfmark.release_sources.slskd.handler import (
     spec_from_task,
 )
 
+
+@pytest.fixture(autouse=True)
+def _original_enqueue_path(monkeypatch):
+    """These tests cover the original enqueue-and-poll-the-list path; isolated mode has its own
+    tests in test_handler_isolated.py."""
+    from shelfmark.release_sources.slskd.handler import SlskdHandler
+
+    monkeypatch.setattr(SlskdHandler, "_isolate_enabled", lambda self: False)
+
+
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 REMOTE_DIR = "@@share\\Books\\Author"
