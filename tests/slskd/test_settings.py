@@ -120,3 +120,70 @@ def test_remote_path_mapping_offers_slskd_host():
     )
     host_column = next(c for c in table.columns if c["key"] == "host")
     assert {"value": "slskd", "label": "slskd"} in host_column["options"]
+
+
+class TestIsolatedDownloadSettings:
+    """The options for isolated downloads (fork additions)."""
+
+    def _fields(self):
+        from shelfmark.core.settings_registry import get_settings_field_map
+        from shelfmark.release_sources.slskd import settings as _settings  # noqa: F401
+
+        return get_settings_field_map("slskd_config")
+
+    def test_isolation_is_on_by_default_with_its_own_folder_prefix(self):
+        fields = self._fields()
+
+        isolate, _ = fields["SLSKD_ISOLATE_DOWNLOADS"]
+        prefix, _ = fields["SLSKD_DESTINATION_PREFIX"]
+        keep, _ = fields["SLSKD_KEEP_COMPLETED"]
+        assert isolate.default is True
+        assert prefix.default == "shelfmark"
+        assert keep.default is True
+
+    def test_the_options_that_only_matter_when_isolated_are_hidden_otherwise(self):
+        fields = self._fields()
+
+        for key in ("SLSKD_DESTINATION_PREFIX", "SLSKD_KEEP_COMPLETED"):
+            assert fields[key][0].show_when == {"field": "SLSKD_ISOLATE_DOWNLOADS", "value": True}
+        # the original "remove completed" option is the one for the non-isolated path
+        assert fields["SLSKD_REMOVE_COMPLETED"][0].show_when == {
+            "field": "SLSKD_ISOLATE_DOWNLOADS",
+            "value": False,
+        }
+
+    def test_a_cleared_url_in_the_form_is_not_replaced_by_the_saved_one(self, monkeypatch):
+        from shelfmark.core import config as core_config
+        from shelfmark.release_sources.slskd.settings import _test_slskd_connection
+
+        monkeypatch.setattr(
+            core_config.config,
+            "get",
+            lambda key, default=None: {
+                "SLSKD_URL": "http://saved:5030",
+                "SLSKD_API_KEY": "saved",
+            }.get(key, default),
+        )
+
+        result = _test_slskd_connection({"SLSKD_URL": "", "SLSKD_API_KEY": "typed"})
+
+        assert result["success"] is False
+        assert "URL is required" in result["message"]
+
+    def test_a_cleared_key_in_the_form_is_not_replaced_by_the_saved_one(self, monkeypatch):
+        from shelfmark.core import config as core_config
+        from shelfmark.release_sources.slskd.settings import _test_slskd_connection
+
+        monkeypatch.setattr(
+            core_config.config,
+            "get",
+            lambda key, default=None: {
+                "SLSKD_URL": "http://saved:5030",
+                "SLSKD_API_KEY": "saved",
+            }.get(key, default),
+        )
+
+        result = _test_slskd_connection({"SLSKD_URL": "http://typed:5030", "SLSKD_API_KEY": ""})
+
+        assert result["success"] is False
+        assert "API key is required" in result["message"]
