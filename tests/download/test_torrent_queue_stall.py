@@ -96,7 +96,8 @@ Q, D = DownloadState.QUEUED, DownloadState.DOWNLOADING
 
 
 def test_a_queued_torrent_asks_for_a_grace_once() -> None:
-    rec = _poll([_status(Q)] * 4)
+    # A clock that starts below the renew interval, like a host that booted a minute ago.
+    rec = _poll([_status(Q)] * 4, clock=[5.0, 5.0, 6.0, 7.0])
 
     assert rec.graces[0] == bh.QUEUE_GRACE_SECONDS
     assert rec.graces.count(bh.QUEUE_GRACE_SECONDS) == 1
@@ -269,3 +270,10 @@ def test_a_queue_wait_past_the_ceiling_gets_no_more_grace() -> None:
     rec = _poll([_status(Q)] * 3, clock=[5000 + t for t in times])
 
     assert rec.graces.count(bh.QUEUE_GRACE_SECONDS) == 1
+
+
+def test_the_first_queue_grace_is_sent_on_a_freshly_booted_host() -> None:
+    assert bh.QUEUE_GRACE_RENEW_SECONDS > 5.0
+    rec = _poll([_status(Q)] * 2, clock=[1.0, 2.0])
+
+    assert rec.graces == [bh.QUEUE_GRACE_SECONDS]

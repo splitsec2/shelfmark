@@ -1005,7 +1005,9 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """
         poll_interval = self._poll_interval()
         queued_since: float | None = None
-        grace_requested_at = 0.0
+        # None, not 0.0: time.monotonic() can be below the renew interval on a host that
+        # booted recently, which would skip the first request.
+        grace_requested_at: float | None = None
         last_progress = 0.0
         start_window_given = False
         stall_window = self._stall_window_seconds()
@@ -1098,16 +1100,16 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     now = time.monotonic()
                     if queued_since is None:
                         queued_since = now
-                    if (
-                        now - queued_since < QUEUE_MAX_WAIT_SECONDS
-                        and now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
+                    if now - queued_since < QUEUE_MAX_WAIT_SECONDS and (
+                        grace_requested_at is None
+                        or now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
                     ):
                         request_activity_grace(status_callback, QUEUE_GRACE_SECONDS)
                         grace_requested_at = now
                 elif queued_since is not None:
                     release_activity_grace(status_callback)
                     queued_since = None
-                    grace_requested_at = 0.0
+                    grace_requested_at = None
 
                 if status.progress > last_progress:
                     if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:
