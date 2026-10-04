@@ -1110,6 +1110,9 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     release_activity_grace(status_callback)
                     queued_since = None
                     grace_requested_at = None
+                    # The release drops the stall deadline back to the orchestrator's own
+                    # timeout, so the torrent needs a fresh window even if it had one before.
+                    start_window_given = False
 
                 if status.progress > last_progress:
                     if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:

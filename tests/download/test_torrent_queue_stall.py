@@ -277,3 +277,22 @@ def test_the_first_queue_grace_is_sent_on_a_freshly_booted_host() -> None:
     rec = _poll([_status(Q)] * 2, clock=[1.0, 2.0])
 
     assert rec.graces == [bh.QUEUE_GRACE_SECONDS]
+
+
+def test_a_torrent_requeued_by_the_client_gets_its_window_back_when_it_leaves() -> None:
+    rec = _poll([_status(D, 0.0), _status(Q), _status(Q), _status(D, 0.0), _status(D, 0.0)])
+
+    # start window, queue grace, release, then a new window instead of the bare 5 minutes
+    assert rec.graces == [WINDOW, bh.QUEUE_GRACE_SECONDS, 0.0, WINDOW]
+
+
+def test_a_moving_torrent_that_gets_requeued_is_not_left_on_the_short_timeout() -> None:
+    rec = _poll([_status(D, 5.0), _status(Q, 5.0), _status(D, 5.0), _status(D, 5.0)])
+
+    assert rec.graces == [WINDOW, bh.QUEUE_GRACE_SECONDS, 0.0, WINDOW]
+
+
+def test_a_requeued_torrent_follows_the_setting_when_it_leaves_the_queue() -> None:
+    rec = _poll([_status(D, 1.0), _status(Q, 1.0), _status(D, 1.0)], minutes=30)
+
+    assert rec.graces == [1800.0, bh.QUEUE_GRACE_SECONDS, 0.0, 1800.0]
