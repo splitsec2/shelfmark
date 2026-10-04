@@ -23,6 +23,7 @@ API_PREFIX = "/api/v0"
 _HTTP_UNAUTHORIZED = 401
 _HTTP_FORBIDDEN = 403
 _HTTP_NOT_FOUND = 404
+_HTTP_METHOD_NOT_ALLOWED = 405
 
 # slskd transfer states are "Phase" or "Completed, Outcome" strings.
 TRANSFER_STATE_COMPLETED_PREFIX = "Completed"
@@ -35,6 +36,10 @@ class SlskdError(Exception):
 
 class SlskdAuthError(SlskdError):
     """Raised when slskd rejects the configured API key."""
+
+
+class SlskdBatchUnsupportedError(SlskdError):
+    """slskd has no batch download endpoint (it is older than 0.26)."""
 
 
 def transfer_is_complete(state: str | None) -> bool:
@@ -288,6 +293,74 @@ class SlskdClient:
 
         wanted = {str(f["filename"]) for f in files}
         return [t for t in self.list_downloads(username) if str(t.get("filename") or "") in wanted]
+
+    def enqueue_batch(
+        self,
+        username: str,
+        files: list[dict[str, Any]],
+        destination: str,
+    ) -> dict[str, Any]:
+        """Queue ``files`` from ``username`` as one batch landing in ``destination``.
+
+        ``destination`` is a path relative to slskd's downloads folder, so every download of
+        ours gets a folder of its own. Returns ``{"batch_id", "transfers", "failures"}``:
+        the transfers slskd created and the files it refused (already queued, say). A slskd
+        that predates batches answers 404 or 405, reported as ``SlskdBatchUnsupportedError``
+        so the caller can fall back to the plain enqueue.
+        """
+        payload = {
+            "username": username,
+            "files": [
+                {"filename": str(f["filename"]), "size": int(f.get("size") or 0)} for f in files
+            ],
+            "options": {"destination": destination},
+        }
+        try:
+            response = self._request("POST", "transfers/downloads/batches", json=payload)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code in (
+                _HTTP_NOT_FOUND,
+                _HTTP_METHOD_NOT_ALLOWED,
+            ):
+                raise SlskdBatchUnsupportedError("slskd has no batch download endpoint") from e
+            raise
+        data = self._json(response)
+        data = data if isinstance(data, dict) else {}
+        batch = data.get("batch") if isinstance(data.get("batch"), dict) else {}
+        failures = data.get("failures")
+        return {
+            "batch_id": str(batch.get("id") or ""),
+            "transfers": [t for t in batch.get("transfers") or [] if isinstance(t, dict)],
+            "failures": [f for f in failures or [] if isinstance(f, dict)],
+        }
+
+    def get_batch(self, batch_id: str) -> dict[str, Any] | None:
+        """One batch with all its transfers, removed ones included; None when it is gone."""
+        try:
+            response = self._request(
+                "GET", f"transfers/downloads/batches/{quote(batch_id, safe='')}"
+            )
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == _HTTP_NOT_FOUND:
+                return None
+            raise
+        data = self._json(response)
+        return data if isinstance(data, dict) else None
+
+    def get_events(self, *, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
+        """slskd's stored events, NEWEST first (``DownloadFileComplete`` and so on).
+
+        They live in slskd's database, so they outlive anything clearing the transfer list.
+        A slskd without the endpoint yields nothing.
+        """
+        try:
+            response = self._request("GET", "events", params={"offset": offset, "limit": limit})
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == _HTTP_NOT_FOUND:
+                return []
+            raise
+        data = self._json(response)
+        return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
 
     def list_downloads(self, username: str) -> list[dict[str, Any]]:
         """Return every download transfer slskd tracks for ``username``, flattened."""
