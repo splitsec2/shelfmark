@@ -484,3 +484,125 @@ class TestSlskdSource:
 
         assert len(releases) == 1
         assert releases[0].extra["file_count"] == 2
+
+
+# ── fork additions: containers, merged variants, strict-match signals ───────────
+
+
+class TestWholeBookContainers:
+    def test_an_m4b_next_to_loose_chapters_is_its_own_release(self):
+        response = _response(
+            files=[
+                _file("@@a\\Dune\\Dune.m4b", 900),
+                _file("@@a\\Dune\\01.mp3", 100),
+                _file("@@a\\Dune\\02.mp3", 100),
+                _file("@@a\\Dune\\03.mp3", 100),
+            ]
+        )
+
+        releases = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert sorted((r.format, r.extra["file_count"]) for r in releases) == [
+            ("m4b", 1),
+            ("mp3", 3),
+        ]
+
+    def test_two_m4b_files_in_one_folder_are_two_releases(self):
+        response = _response(files=[_file("@@a\\Dune\\A.m4b", 5), _file("@@a\\Dune\\B.m4b", 6)])
+
+        releases = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert sorted(r.extra["file_count"] for r in releases) == [1, 1]
+
+    def test_mixed_chapter_formats_stay_one_release(self):
+        response = _response(files=[_file("@@a\\Dune\\01.flac"), _file("@@a\\Dune\\02.mp3")])
+
+        releases = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert len(releases) == 1
+
+
+class TestMergedQueryVariants:
+    def test_chapters_found_by_different_queries_are_one_release(self, monkeypatch):
+        import shelfmark.release_sources.slskd.source as mod
+
+        monkeypatch.setattr(mod.config, "get", TestSlskdSource()._config())
+        client = MagicMock()
+        client.search.side_effect = [
+            [_response(files=[_file("@@a\\Dune\\01.mp3"), _file("@@a\\Dune\\02.mp3")])],
+            [_response(files=[_file("@@a\\Dune\\02.mp3"), _file("@@a\\Dune\\03.mp3")])],
+        ]
+        monkeypatch.setattr(SlskdSource, "_get_client", lambda self: client)
+
+        releases = SlskdSource().search(
+            _make_book(), _make_plan(), expand_search=True, content_type="audiobook"
+        )
+
+        assert len(releases) == 1
+        assert [f["filename"] for f in releases[0].extra["files"]] == [
+            "@@a\\Dune\\01.mp3",
+            "@@a\\Dune\\02.mp3",
+            "@@a\\Dune\\03.mp3",
+        ]
+
+    def test_merging_keeps_each_peers_own_slot_details(self):
+        from shelfmark.release_sources.slskd.source import merge_responses
+
+        first = _response(username="a", files=[_file("x\\1.mp3")], hasFreeUploadSlot=True)
+        second = _response(
+            username="a", files=[_file("x\\2.mp3")], hasFreeUploadSlot=False, queueLength=9
+        )
+        other = _response(username="b", files=[_file("y\\1.mp3")])
+
+        merged = merge_responses([[first], [second, other]])
+
+        assert sorted(r["username"] for r in merged) == ["a", "b"]
+        a = next(r for r in merged if r["username"] == "a")
+        assert sorted(f["filename"] for f in a["files"]) == ["x\\1.mp3", "x\\2.mp3"]
+        assert a["hasFreeUploadSlot"] is True  # the first answer's details win
+
+
+class TestStrictMatchSignals:
+    """Auto-download looks for the author in the title, the peer name and extra['author'], and
+    for bundle names in extra['title_raw']. A Soulseek result has the author only in its folder."""
+
+    def test_the_folder_path_is_offered_as_the_author_text(self):
+        response = _response(files=[_file("@@a\\Books\\Frank Herbert\\Dune\\Dune.epub")])
+
+        (release,) = build_releases([response], content_type="ebook", formats=EBOOK_FORMATS)
+
+        assert "Frank Herbert" in release.extra["author"]
+        assert "Dune" in release.extra["author"]
+
+    def test_a_folder_release_also_offers_its_path_as_the_author_text(self):
+        response = _response(
+            files=[
+                _file("@@a\\Audio\\Frank Herbert\\Dune\\01.mp3"),
+                _file("@@a\\Audio\\Frank Herbert\\Dune\\02.mp3"),
+            ]
+        )
+
+        (release,) = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert "Frank Herbert" in release.extra["author"]
+
+    def test_the_folder_name_is_kept_for_bundle_detection(self):
+        response = _response(
+            files=[
+                _file("@@a\\Herbert\\Dune Complete Series\\01.mp3"),
+                _file("@@a\\Herbert\\Dune Complete Series\\02.mp3"),
+            ]
+        )
+
+        (release,) = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert "Complete Series" in release.extra["title_raw"]
+
+
+class TestAvailability:
+    def test_unavailable_without_an_api_key(self, monkeypatch):
+        import shelfmark.release_sources.slskd.source as mod
+
+        monkeypatch.setattr(mod.config, "get", TestSlskdSource()._config(SLSKD_API_KEY=""))
+
+        assert SlskdSource().is_available() is False

@@ -7,6 +7,7 @@ audiobook results are grouped by (peer, directory) into a single multi-file rele
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from hashlib import sha256
@@ -50,6 +51,8 @@ DEFAULT_SEARCH_WAIT_SECONDS = 15
 DEFAULT_RESPONSE_LIMIT = 100
 MAX_QUERY_VARIANTS = 3
 
+# Whole-book audio files: one file holds the entire book, unlike chapter files.
+CONTAINER_FORMATS = frozenset({"m4b", "m4a"})
 _DEFAULT_EBOOK_FORMATS = ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"]
 _DEFAULT_AUDIOBOOK_FORMATS = [*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS]
 
@@ -188,6 +191,13 @@ def _strip_extension(basename: str) -> str:
     return stem or basename
 
 
+def _path_text(directory: str) -> str:
+    """A remote folder path as plain words. A Soulseek result has no author field, but the
+    folders nearly always name one ("Books\\Frank Herbert\\Dune"), so the path is what
+    auto-download's author check reads (it looks at ``extra["author"]``)."""
+    return " ".join(part for part in re.split(r"[\\/]", directory) if part and part != "@@")
+
+
 def file_release(peer_file: PeerFile, response: dict[str, Any], content_type: str) -> Release:
     """Build a single-file release."""
     is_audio = check_audiobook(content_type)
@@ -208,6 +218,8 @@ def file_release(peer_file: PeerFile, response: dict[str, Any], content_type: st
             **_peer_extra(response),
             "directory": peer_file.directory,
             "directory_name": remote_directory_name(peer_file.directory),
+            "author": _path_text(peer_file.directory),
+            "title_raw": f"{remote_directory_name(peer_file.directory)} {_strip_extension(peer_file.basename)}".strip(),
             "file_count": 1,
             "files": [{"filename": peer_file.filename, "size": peer_file.size}],
             "formats": [peer_file.extension] if peer_file.extension else [],
@@ -246,6 +258,8 @@ def directory_release(
             **_peer_extra(response),
             "directory": first.directory,
             "directory_name": directory_name,
+            "author": _path_text(first.directory),
+            "title_raw": directory_name,
             "file_count": len(files),
             "files": [{"filename": f.filename, "size": f.size} for f in files],
             "formats": formats,
@@ -280,8 +294,17 @@ def build_releases(
                 # An archive is a whole audiobook on its own; keep those separate from
                 # the loose chapter files next to them.
                 archives = [f for f in grouped if f.extension in ARCHIVE_FORMATS]
-                loose = [f for f in grouped if f.extension not in ARCHIVE_FORMATS]
-                candidates.extend(file_release(f, response, content_type) for f in archives)
+                # An m4b/m4a is a whole book in one file too. Next to a folder of chapters it
+                # is a different copy of the book, not another chapter.
+                containers = [f for f in grouped if f.extension in CONTAINER_FORMATS]
+                loose = [
+                    f
+                    for f in grouped
+                    if f.extension not in ARCHIVE_FORMATS and f.extension not in CONTAINER_FORMATS
+                ]
+                candidates.extend(
+                    file_release(f, response, content_type) for f in [*archives, *containers]
+                )
                 if len(loose) == 1:
                     candidates.append(file_release(loose[0], response, content_type))
                 elif loose:
@@ -294,6 +317,33 @@ def build_releases(
             releases.append(release)
 
     return releases
+
+
+def merge_responses(batches: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Combine the responses of several searches, one per peer.
+
+    Different queries can return different parts of the same peer's folder (the title+author
+    query some chapters, the bare title others). Building releases per query would keep the
+    first partial folder and drop the rest, so files are merged by peer first. The peer's
+    slot and queue details are those of its first answer.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for batch in batches:
+        for response in batch:
+            username = str(response.get("username") or "").strip()
+            if not username:
+                continue
+            known = merged.get(username)
+            if known is None:
+                merged[username] = {**response, "files": list(response.get("files") or [])}
+                continue
+            have = {str(f.get("filename") or "") for f in known["files"] if isinstance(f, dict)}
+            for raw in response.get("files") or []:
+                name = str(raw.get("filename") or "") if isinstance(raw, dict) else ""
+                if name and name not in have:
+                    known["files"].append(raw)
+                    have.add(name)
+    return list(merged.values())
 
 
 def rank_key(release: Release) -> tuple:
@@ -445,7 +495,7 @@ class SlskdSource(ReleaseSource):
         deadline = time.monotonic() + SLSKD_SEARCH_TIMEOUT_SECONDS
 
         releases: list[Release] = []
-        seen_ids: set[str] = set()
+        answered: list[list[dict[str, Any]]] = []
         # Expanding keeps going through every variant even after one produced results.
         for index, query in enumerate(queries, start=1):
             if releases and not expand_search:
@@ -465,11 +515,10 @@ class SlskdSource(ReleaseSource):
                 logger.exception("slskd search failed for '%s'", query)
                 continue
 
-            for release in build_releases(responses, content_type=content_type, formats=formats):
-                if release.source_id in seen_ids:
-                    continue
-                seen_ids.add(release.source_id)
-                releases.append(release)
+            answered.append(responses)
+            releases = build_releases(
+                merge_responses(answered), content_type=content_type, formats=formats
+            )
 
         releases.sort(key=rank_key)
         if releases:
@@ -481,5 +530,7 @@ class SlskdSource(ReleaseSource):
 
     def is_available(self) -> bool:
         if not config.get("SLSKD_ENABLED", False):
+            return False
+        if not str(config.get("SLSKD_API_KEY", "") or "").strip():
             return False
         return bool(normalize_http_url(str(config.get("SLSKD_URL", "") or "")))
