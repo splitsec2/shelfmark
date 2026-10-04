@@ -1506,10 +1506,13 @@ Automatically retry search without category filtering if no results are found
 | `SLSKD_URL` | Base URL of the slskd web interface | string | _none_ |
 | `SLSKD_API_KEY` | An API key from slskd's configuration (web.authentication.api_keys) with the readwrite role | string (secret) | _none_ |
 | `SLSKD_DOWNLOAD_PATH` | Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empty when both containers see it at the same path, or use Settings > Advanced > Remote Path Mappings with client 'slskd'. | string | _none_ |
+| `SLSKD_ISOLATE_DOWNLOADS` | Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk. | boolean | `true` |
+| `SLSKD_DESTINATION_PREFIX` | The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder. | string | `shelfmark` |
+| `SLSKD_KEEP_COMPLETED` | Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported. | boolean | `true` |
 | `SLSKD_SEARCH_TIMEOUT` | How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower. | number | `15` |
 | `SLSKD_RESPONSE_LIMIT` | Stop a search early once this many peers have answered | number | `100` |
 | `SLSKD_QUEUE_TIMEOUT_MINUTES` | Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely. | number | `60` |
-| `SLSKD_REMOVE_COMPLETED` | Clear the transfer from slskd's download list after Shelfmark imports it | boolean | `true` |
+| `SLSKD_REMOVE_COMPLETED` | Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder. | boolean | `true` |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -1550,6 +1553,33 @@ Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empt
 - **Type:** string
 - **Default:** _none_
 
+#### `SLSKD_ISOLATE_DOWNLOADS`
+
+**Give each download its own folder**
+
+Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_DESTINATION_PREFIX`
+
+**Download Folder**
+
+The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder.
+
+- **Type:** string
+- **Default:** `shelfmark`
+
+#### `SLSKD_KEEP_COMPLETED`
+
+**Keep finished files in slskd**
+
+Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported.
+
+- **Type:** boolean
+- **Default:** `true`
+
 #### `SLSKD_SEARCH_TIMEOUT`
 
 **Search Wait (seconds)**
@@ -1584,7 +1614,7 @@ Give up when the peer has not started sending within this long. Set to 0 to wait
 
 **Remove completed transfers from slskd**
 
-Clear the transfer from slskd's download list after Shelfmark imports it
+Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder.
 
 - **Type:** boolean
 - **Default:** `true`
