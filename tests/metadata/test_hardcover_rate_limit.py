@@ -243,3 +243,30 @@ class TestExecuteQueryThrottling:
 
         assert provider._execute_query("query { me { id } }", {}) is None
         assert session.posts == 1
+
+
+class TestGetBookDuringThrottle:
+    def test_get_book_recovers_from_a_single_429(self, clock):
+        provider, session = provider_with(throttled("1"), ok())
+
+        book = provider.get_book("7")
+
+        assert book is not None
+        assert book.title == "Dune"
+        assert session.posts == 2
+
+    def test_get_book_raises_instead_of_reporting_not_found(self, clock):
+        provider, _session = provider_with(throttled("1"))
+
+        with pytest.raises(HardcoverRateLimitError):
+            provider.get_book("7")
+
+    def test_get_book_still_returns_none_when_graphql_rejects_it(self, clock):
+        provider, _session = provider_with(FakeResponse(200, {"errors": [{"message": "nope"}]}))
+
+        assert provider.get_book("7") is None
+
+    def test_get_book_still_returns_none_for_a_missing_book(self, clock):
+        provider, _session = provider_with(ok({"books": []}))
+
+        assert provider.get_book("7") is None
