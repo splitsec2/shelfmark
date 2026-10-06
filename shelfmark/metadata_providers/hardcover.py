@@ -2640,7 +2640,9 @@ class HardcoverProvider(MetadataProvider):
 
         try:
             book_id_int = int(book_id)
-            result = self._execute_query(graphql_query, {"id": book_id_int})
+            # A failed lookup is not "no such book": let throttling and outages reach the
+            # caller instead of coming back as None.
+            result = self._execute_query(graphql_query, {"id": book_id_int}, raise_on_error=True)
             if not result:
                 return None
 
@@ -2650,6 +2652,9 @@ class HardcoverProvider(MetadataProvider):
 
             return self._parse_book(books[0])
 
+        except HardcoverGraphQLError:
+            logger.exception("Hardcover rejected the book lookup for %s", book_id)
+            return None
         except ValueError:
             logger.exception("Invalid book ID: %s", book_id)
             return None
