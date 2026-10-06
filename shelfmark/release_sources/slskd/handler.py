@@ -539,6 +539,8 @@ class SlskdHandler(DownloadHandler):
                 missing_polls += 1
                 if missing_polls >= MAX_MISSING_POLLS:
                     status_callback("error", "Transfer disappeared from slskd")
+                    # Part of a multi-file release may still be listed and downloading.
+                    self._cancel_transfers(client, spec, remove=True)
                     return None
                 status_callback("resolving", "Waiting for slskd...")
                 if cancel_flag.wait(timeout=poll_interval):

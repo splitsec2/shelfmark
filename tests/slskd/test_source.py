@@ -178,6 +178,15 @@ class TestBuildReleases:
         releases = build_releases([response], content_type="ebook", formats={"epub"})
         assert [r.format for r in releases] == ["epub"]
 
+    def test_bare_files_with_no_folder_are_not_grouped_into_one_audiobook(self):
+        response = _response(
+            files=[_file("01 Intro.mp3", 100), _file("Other Book.mp3", 200), _file("c.mp3", 300)]
+        )
+
+        releases = build_releases([response], content_type="audiobook", formats=AUDIO_FORMATS)
+
+        assert sorted(r.extra["file_count"] for r in releases) == [1, 1, 1]
+
     def test_audiobook_groups_directory(self):
         response = _response(
             files=[

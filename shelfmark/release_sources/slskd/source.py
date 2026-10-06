@@ -288,7 +288,10 @@ def build_releases(
         else:
             by_directory: dict[str, list[PeerFile]] = {}
             for peer_file in matching:
-                by_directory.setdefault(peer_file.directory, []).append(peer_file)
+                # A bare filename has no folder, so grouping on "" would bundle unrelated
+                # files from the same peer into one audiobook; give each its own group.
+                key = peer_file.directory or f"\0{peer_file.filename}"
+                by_directory.setdefault(key, []).append(peer_file)
             candidates = []
             for grouped in by_directory.values():
                 # An archive is a whole audiobook on its own; keep those separate from
