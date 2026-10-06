@@ -537,7 +537,28 @@ class TestDownload:
         )
         assert rec.last_status == "error"
         assert rec.last_message == "Transfer disappeared from slskd"
-        assert fake.poll_count == 3
+        # Three polls to give up, then the cleanup pass looks the transfers up again.
+        assert fake.poll_count >= 3
+
+    def test_a_file_vanishing_from_a_multi_file_release_cancels_the_others(
+        self, fast_handler, config_values, monkeypatch
+    ):
+        import shelfmark.release_sources.slskd.handler as mod
+
+        monkeypatch.setattr(mod, "MAX_MISSING_POLLS", 3)
+        files = [{"filename": FILE_A, "size": 1000}, {"filename": FILE_B, "size": 1000}]
+        # FILE_B is never listed again; FILE_A keeps downloading.
+        fake = FakeSlskd(polls=[[_transfer(FILE_A, "InProgress", transferred=10, tid="live")]])
+        _mount(fast_handler, fake)
+        rec = ProgressRecorder()
+
+        result = fast_handler.download(
+            _task(files=files), Event(), rec.progress_callback, rec.status_callback
+        )
+
+        assert result is None
+        assert rec.last_message == "Transfer disappeared from slskd"
+        assert ("peer", "live", True) in fake.cancelled
 
     def test_queue_timeout_errors(self, fast_handler, config_values, monkeypatch):
         import shelfmark.release_sources.slskd.handler as mod
