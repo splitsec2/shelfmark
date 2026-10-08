@@ -708,6 +708,10 @@ export const rejectAdminRequest = async (
   });
 };
 
+export const listRejectedAdminRequests = async (): Promise<RequestRecord[]> => {
+  return fetchJSON<RequestRecord[]>(`${API.adminRequests}?status=rejected`);
+};
+
 export const reopenAdminRequest = async (
   id: number,
   body: RejectAdminRequestBody = {},
