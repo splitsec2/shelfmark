@@ -29,6 +29,8 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 |---|---|
 | Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork |
 | A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork |
+| Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo) |
+| Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo) |
 
 ### Sources and downloads
 
@@ -36,6 +38,7 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 |---|---|
 | Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base, my additions sent as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
 | Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) merges |
+| AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo) |
 
 ### Requests and the activity list (admin)
 
@@ -53,6 +56,7 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | Change | Origin |
 |---|---|
 | Fork-only CI: amd64-only images and no legacy alias job. This one isn't meant for upstream | This fork |
+| Mesa and LLVM are dropped from the image (about 180 MB). Chromium draws WebGL with its own SwiftShader, so they were never used | Ported from [DrNgo/shelfmark-fork@075caff](https://github.com/DrNgo/shelfmark-fork/commit/075caff) by [@DrNgo](https://github.com/DrNgo), the ffmpeg part left out because upstream still uses it |
 
 Docs for the added features live on the branches that carry them:
 [Hardcover sync](https://github.com/splitsec2/shelfmark/blob/build/fork-images/docs/hardcover-sync.md) ·
