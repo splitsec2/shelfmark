@@ -32,13 +32,17 @@ A release is a strict match only when all of the following hold:
 
 Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
+A request whose book turns out to be in your library already is closed, not left pending: it is marked fulfilled with the admin note `[auto] Already in the library.`, so it stops being looked up every pass. Before this it sat in Needs Review indefinitely. **Clear Completed** clears these too.
+
+Hardcover allows a short burst of lookups and then answers 429. Each pass paces its book lookups and backs off when told to, following `Retry-After`. A lookup that still fails counts as an error for that request, not as "book not found", and the request is tried again next pass.
+
 A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
 
 ### Library check
 
 When enabled, both shelf sync and automatic downloads look the book up in the libraries you have connected — Audiobookshelf for audiobook requests, a Calibre library (Calibre-Web / Calibre-Web Automated) for ebook requests — by provider id, ISBN, or fuzzy title plus author surname, and skip it if it is already there. Each library is indexed at most every 10 minutes. Settings, mounting and the matching rules are described in [Library Check](library-check.md).
 
-The check **fails open**: if a library is unreachable or returns an error, Shelfmark logs a warning, reuses the last successful fetch if it has one, and otherwise treats the book as not owned so processing continues.
+If a library is unreachable or returns an error, Shelfmark reuses the last successful fetch if it has one. Without one, it does not guess: shelf sync skips that run (requesting now could queue books the library already holds) and automatic download leaves the request pending for the next pass. Search-result badges are the exception and simply show nothing.
 
 ## Per-user accounts
 
