@@ -8,15 +8,50 @@
 
 Upstream's scope deliberately excludes library integration, automation and collection
 management ([Contributing](#contributing)). This fork adds exactly that layer, for a setup
-where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf server:
+where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf server.
+
+### Hardcover sync and auto-download
 
 | Change | Origin |
 |---|---|
 | Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork |
-| Auto-download matching fixes: sources that report no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy single-book requests, same-format candidates rank by download count, and a failed download no longer stops a book from syncing again | This fork |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork |
+| Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork |
+| Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork |
+| A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork |
+| A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork |
+| Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, sent upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439) |
+
+### Library check
+
+| Change | Origin |
+|---|---|
 | Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork |
+| A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork |
+
+### Sources and downloads
+
+| Change | Origin |
+|---|---|
+| Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base, my additions sent as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
+| Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) merges |
+
+### Requests and the activity list (admin)
+
+| Change | Origin |
+|---|---|
+| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork, raised upstream as issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) |
+| A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork |
+| A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork |
+| The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork |
+| Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork |
+| The browser tab title follows the search page title setting | This fork, upstream candidate |
+
+### Build
+
+| Change | Origin |
+|---|---|
 | Fork-only CI: amd64-only images and no legacy alias job. This one isn't meant for upstream | This fork |
 
 Docs for the added features live on the branches that carry them:
@@ -26,7 +61,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Sixteen have merged so far.
+there rather than living in this fork. Twenty-two have merged so far.
 
 Features, refactors and auth:
 
@@ -40,6 +75,18 @@ Features, refactors and auth:
 - [#1377](https://github.com/calibrain/shelfmark/pull/1377) the Calibre half of the library
   check, after [discussion #1372](https://github.com/calibrain/shelfmark/discussions/1372)
   where the maintainer agreed to that specific shape
+- [#1380](https://github.com/calibrain/shelfmark/pull/1380) Debrid-Link as a torrent client
+- [#1419](https://github.com/calibrain/shelfmark/pull/1419) a read-only API key and a
+  `/api/stats` endpoint, for a dashboard tile that can't change anything
+
+Downloads:
+
+- [#1409](https://github.com/calibrain/shelfmark/pull/1409) reconcile downloads a restart
+  interrupted
+- [#1420](https://github.com/calibrain/shelfmark/pull/1420) don't cancel a queued torrent as
+  stalled
+- [#1421](https://github.com/calibrain/shelfmark/pull/1421) remove a cancelled torrent that
+  never started
 
 Bugs found while working in this code, from a read of the upstream source:
 
@@ -70,6 +117,8 @@ Build and tests:
   layers cacheable, so an incremental pull drops from 526 MB to 3.7 MB
 - [#1381](https://github.com/calibrain/shelfmark/pull/1381) stop the proxy provisioning
   tests depending on run order, which my #1356 introduced
+- [#1404](https://github.com/calibrain/shelfmark/pull/1404) stop shipping build-only content
+  in the runtime image, with ideas from [@DrNgo](https://github.com/DrNgo)
 
 The fail-open auth defect that [DrNgo/shelfmark-fork](https://github.com/DrNgo/shelfmark-fork)
 fixed was fixed upstream in [#1397](https://github.com/calibrain/shelfmark/pull/1397), so this
@@ -77,7 +126,30 @@ fork no longer carries its own copy.
 
 Open:
 
-- [#1380](https://github.com/calibrain/shelfmark/pull/1380) Debrid-Link as a torrent client
+- [#1426](https://github.com/calibrain/shelfmark/pull/1426) make the torrent stall window a
+  setting
+- [#1428](https://github.com/calibrain/shelfmark/pull/1428) Soulseek (slskd) release source,
+  building on #1335
+- [#1429](https://github.com/calibrain/shelfmark/pull/1429) first terminal status wins, so a
+  late COMPLETE can't overwrite a cancel
+- [#1430](https://github.com/calibrain/shelfmark/pull/1430) back off after a failed library
+  index instead of retrying for every result
+- [#1431](https://github.com/calibrain/shelfmark/pull/1431) Debrid-Link reuses the file list
+  from the status check
+- [#1432](https://github.com/calibrain/shelfmark/pull/1432) keep `SHELFMARK_API_KEY_READONLY`
+  out of the debug bundle
+- [#1433](https://github.com/calibrain/shelfmark/pull/1433) report a ValueError from a source
+  as that source's error
+- [#1434](https://github.com/calibrain/shelfmark/pull/1434) Google Books reports more pages
+  when the limit is above its 40 result maximum
+- [#1435](https://github.com/calibrain/shelfmark/pull/1435) a cache export error should not
+  fail the image publish
+- [#1438](https://github.com/calibrain/shelfmark/pull/1438) Clear Completed leaves out
+  requests that are still pending
+- [#1439](https://github.com/calibrain/shelfmark/pull/1439) Hardcover rate limiting and 429
+  backoff
+- Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) admins can't undo a
+  rejected request (the fix is ready here, waiting to hear if a PR is wanted)
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
