@@ -41,6 +41,7 @@ interface ActivitySidebarProps {
     },
   ) => Promise<void> | void;
   onRequestReject?: (requestId: number, adminNote?: string) => Promise<void> | void;
+  onRequestReopen?: (requestId: number) => Promise<void> | void;
   onRequestDismiss?: (requestId: number) => void;
   onPinnedOpenChange?: (pinnedOpen: boolean) => void;
   pinnedTopOffset?: number;
@@ -233,6 +234,7 @@ export const ActivitySidebar = ({
   onRequestCancel,
   onRequestApprove,
   onRequestReject,
+  onRequestReopen,
   onRequestDismiss,
   onPinnedOpenChange,
   pinnedTopOffset = 0,
@@ -923,6 +925,7 @@ export const ActivitySidebar = ({
                                 }
                               : undefined
                           }
+                          onRequestReopen={showRequestActions ? onRequestReopen : undefined}
                           showRequestDetailsToggle={canShowRequestReview}
                           isRequestDetailsOpen={shouldShowRequestReview}
                           isSelected={shouldShowRequestReview || shouldShowRejectDialog}
