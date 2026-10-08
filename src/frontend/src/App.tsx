@@ -374,6 +374,7 @@ function App() {
     activityHistoryHasMore,
     prefetchActivityHistory,
     refreshActivitySnapshot,
+    refreshHistoryIfLoaded,
     resetActivity,
     handleActivityTabChange,
     handleActivityHistoryLoadMore,
@@ -1812,12 +1813,19 @@ function App() {
       try {
         await reopenSidebarRequest(requestId);
         await refreshActivitySnapshot();
+        refreshHistoryIfLoaded();
         showToast('Request reopened', 'success');
       } catch (error) {
         showToast(getErrorMessage(error, 'Failed to reopen request'), 'error');
       }
     },
-    [refreshActivitySnapshot, requestRoleIsAdmin, reopenSidebarRequest, showToast],
+    [
+      refreshActivitySnapshot,
+      refreshHistoryIfLoaded,
+      requestRoleIsAdmin,
+      reopenSidebarRequest,
+      showToast,
+    ],
   );
 
   const handleRequestApprove = useCallback(
