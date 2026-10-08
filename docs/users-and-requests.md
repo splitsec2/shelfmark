@@ -116,3 +116,5 @@ Admins can override the default ebook/audiobook modes and request rules for indi
 5. If delivery fails, an admin can reopen the request to try a different release
 6. Users can cancel their own pending requests
 7. An admin can **reopen** a rejected request, from the Requests tab or from History. It goes back to pending with what the user originally asked for, and shows in the activity list again even if the user had dismissed it.
+
+An admin sees who declined a request and when on its card, with the admin note if one was given.
