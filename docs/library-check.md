@@ -53,7 +53,7 @@ A book counts as owned when any of these match a library entry:
 2. **ISBN** — ISBN-10 and ISBN-13 are both recognised, and an ISBN-10 on either side is also compared in its ISBN-13 form, so a library that stores only one form still matches. Calibre indexes the `isbn`, `isbn-10` and `isbn-13` identifiers; Audiobookshelf its ISBN field.
 3. **Title and author** — at least 85% of the significant words in the title appear in the entry (title, authors, series and, for Audiobookshelf, folder path), and the author's surname appears too. A book with no author metadata matches on title alone.
 
-Sequels and other near-miss titles fail the title rule; the same title by a different author fails the surname rule.
+Sequels and other near-miss titles fail the title rule; the same title by a different author fails the surname rule. A shelf title whose bracketed words name another edition ("Full Cast Edition", "Dramatized Adaptation") is not the book either: owning the adaptation is not owning the recording asked for. Printing words ("Illustrated Edition", "Unabridged") change nothing, and in a Calibre title a numbered parenthetical ("(Alex Cross Series #11)") is read as the series, not as an edition.
 
 ## Badges in Search Results
 
