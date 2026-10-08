@@ -357,6 +357,7 @@ function App() {
     cancelRequest: cancelUserRequest,
     fulfilRequest: fulfilSidebarRequest,
     rejectRequest: rejectSidebarRequest,
+    reopenRequest: reopenSidebarRequest,
   } = useRequests({
     isAdmin: requestRoleIsAdmin,
   });
@@ -1802,6 +1803,23 @@ function App() {
     [refreshActivitySnapshot, requestRoleIsAdmin, rejectSidebarRequest, showToast],
   );
 
+  const handleRequestReopen = useCallback(
+    async (requestId: number) => {
+      if (!requestRoleIsAdmin) {
+        return;
+      }
+
+      try {
+        await reopenSidebarRequest(requestId);
+        await refreshActivitySnapshot();
+        showToast('Request reopened', 'success');
+      } catch (error) {
+        showToast(getErrorMessage(error, 'Failed to reopen request'), 'error');
+      }
+    },
+    [refreshActivitySnapshot, requestRoleIsAdmin, reopenSidebarRequest, showToast],
+  );
+
   const handleRequestApprove = useCallback(
     async (
       requestId: number,
@@ -2764,6 +2782,7 @@ function App() {
         onRequestCancel={showRequestsTab ? handleRequestCancel : undefined}
         onRequestApprove={requestRoleIsAdmin ? handleRequestApprove : undefined}
         onRequestReject={requestRoleIsAdmin ? handleRequestReject : undefined}
+        onRequestReopen={requestRoleIsAdmin ? handleRequestReopen : undefined}
         onRequestDismiss={showRequestsTab ? handleRequestDismiss : undefined}
         onPinnedOpenChange={setSidebarPinnedOpen}
         pinnedTopOffset={headerHeight}
