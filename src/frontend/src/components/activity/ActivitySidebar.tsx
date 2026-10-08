@@ -914,7 +914,7 @@ export const ActivitySidebar = ({
                                 }
                               : undefined
                           }
-                          onRequestReopen={showRequestActions ? onRequestReopen : undefined}
+                          onRequestReopen={onRequestReopen}
                           showRequestDetailsToggle={canShowRequestReview}
                           isRequestDetailsOpen={shouldShowRequestReview}
                           isSelected={shouldShowRequestReview || shouldShowRejectDialog}
