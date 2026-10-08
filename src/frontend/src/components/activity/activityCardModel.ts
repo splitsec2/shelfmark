@@ -59,6 +59,14 @@ const getPendingRequestText = (item: ActivityItem, isAdmin: boolean): string => 
   return username ? `Needs review · ${username}` : 'Needs review';
 };
 
+// An ebook and an audiobook request for the same book otherwise look like a duplicate.
+const getRequestFormatLabel = (item: ActivityItem): string | undefined => {
+  const contentType = item.requestRecord?.content_type;
+  if (contentType === 'audiobook') return 'Audiobook';
+  if (contentType === 'ebook') return 'Ebook';
+  return undefined;
+};
+
 const getRequestBadge = (item: ActivityItem, isAdmin: boolean): ActivityCardBadge => {
   const requestVisualStatus = item.requestRecord
     ? toRequestVisualStatus(item.requestRecord.status)
@@ -89,6 +97,11 @@ const getRequestBadge = (item: ActivityItem, isAdmin: boolean): ActivityCardBadg
     text = isAdmin ? 'Declined' : 'Not approved';
   } else if (requestVisualStatus === 'cancelled') {
     text = isAdmin ? 'Cancelled by requester' : 'Cancelled';
+  }
+
+  const formatLabel = getRequestFormatLabel(item);
+  if (formatLabel && item.kind === 'request' && !hasFailureReason) {
+    text = `${formatLabel} · ${text}`;
   }
 
   return {

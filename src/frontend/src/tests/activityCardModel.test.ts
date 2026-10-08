@@ -311,4 +311,37 @@ describe('activityCardModel', () => {
     const requesterLine = buildActivityCardModel(item, false).noteLine;
     expect(requesterLine).toBe('"[auto] already in the library"');
   });
+
+  it('names the format on request badges so an ebook and audiobook pair do not look duplicated', () => {
+    const base = {
+      id: 46,
+      user_id: 7,
+      status: 'rejected' as const,
+      source_hint: null,
+      request_level: 'book' as const,
+      policy_mode: 'request_book' as const,
+      book_data: { title: 'A Game of Thrones, Part 1' },
+      release_data: null,
+      note: null,
+      admin_note: null,
+      reviewed_by: 1,
+      reviewed_at: null,
+      created_at: '2026-09-19T21:22:21Z',
+      updated_at: '2026-09-19T21:22:21Z',
+    };
+    const badgeFor = (contentType: 'ebook' | 'audiobook') =>
+      buildActivityCardModel(
+        makeItem({
+          kind: 'request',
+          visualStatus: 'rejected',
+          requestId: 46,
+          downloadBookId: undefined,
+          requestRecord: { ...base, content_type: contentType },
+        }),
+        true,
+      ).badges[0]?.text;
+
+    expect(badgeFor('ebook')).toBe('Ebook · Declined');
+    expect(badgeFor('audiobook')).toBe('Audiobook · Declined');
+  });
 });
