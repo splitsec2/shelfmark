@@ -274,6 +274,20 @@ def test_a_failing_library_is_retried_once_the_back_off_has_passed(
     assert provider.fetches == 2
 
 
+def test_a_strict_check_still_refuses_during_the_back_off(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, error=OSError("mount gone"))
+    providers.append(provider)
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+
+    # Inside the back-off nothing is fetched, and the answer must not fall back to "not owned".
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+    assert provider.fetches == 1
+
+
 def test_a_strict_check_refuses_to_guess_when_a_library_is_down_and_nothing_is_cached(
     providers: list[_Provider],
 ) -> None:
