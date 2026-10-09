@@ -37,6 +37,9 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 _CACHE_TTL_SECONDS = 600  # Re-index a library at most every 10 minutes unless it changed.
+# After a failed index, answer from the stale cache for this long before trying again, so a
+# search page with dozens of results costs one failed attempt and one warning, not one each.
+_FAILURE_BACKOFF_SECONDS = 60
 
 
 @dataclass
@@ -44,6 +47,7 @@ class _CacheSlot:
     entries: list[LibraryEntry] | None = None
     fetched_at: float = 0.0
     fingerprint: object | None = None
+    failed_at: float | None = None
 
 
 _lock = threading.Lock()
@@ -60,6 +64,7 @@ def _store(provider_name: str, entries: list[LibraryEntry], fingerprint: object 
     with _lock:
         slot.entries = entries
         slot.fetched_at = time.monotonic()
+        slot.failed_at = None
         slot.fingerprint = fingerprint
 
 
@@ -75,6 +80,19 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
     which suits badges. ``strict`` raises instead, for callers that act on the answer.
     """
     slot = _slot(provider.name)
+    with _lock:
+        backing_off = slot.failed_at is not None and (
+            time.monotonic() - slot.failed_at < _FAILURE_BACKOFF_SECONDS
+        )
+        stale = slot.entries
+    if backing_off:
+        # Same answer the failure gave: the stale index, or (strict) a refusal to guess.
+        if stale is not None:
+            return stale
+        if strict:
+            msg = f"{provider.describe()} is unavailable (retrying after a short back-off)"
+            raise LibraryUnavailableError(msg)
+        return []
     try:
         fingerprint = provider.fingerprint()
         with _lock:
@@ -86,6 +104,7 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
         entries = provider.fetch_entries()
     except Exception as exc:
         with _lock:
+            slot.failed_at = time.monotonic()
             stale = slot.entries
         if stale is not None:
             logger.warning(

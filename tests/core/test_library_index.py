@@ -227,6 +227,67 @@ def test_provider_error_keeps_answering_from_the_stale_cache(
     assert len(warnings) == 1
 
 
+def test_a_failing_library_is_tried_once_per_search_not_once_per_result(
+    providers: list[_Provider], monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, [_DCC_ENTRY])
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "ebook") is True
+
+    provider.error = RuntimeError("boom")
+    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
+
+    for _ in range(40):  # one search page, every result asks
+        assert library_index.is_in_library(_book(), "ebook") is True
+
+    assert provider.fetches == 2  # the first index, then one failed attempt
+    assert len(warnings) == 1
+
+
+def test_a_failing_library_with_no_cache_is_not_retried_for_every_result(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, error=OSError("no such file"))
+    providers.append(provider)
+
+    for _ in range(10):
+        assert library_index.is_in_library(_book(), "ebook") is False
+
+    assert provider.fetches == 1
+
+
+def test_a_failing_library_is_retried_once_the_back_off_has_passed(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, [_DCC_ENTRY], error=OSError("down"))
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "ebook") is False
+
+    provider.error = None
+    clock[0] += library_index._FAILURE_BACKOFF_SECONDS - 1
+    assert library_index.is_in_library(_book(), "ebook") is False
+    assert provider.fetches == 1
+
+    clock[0] += 2
+    assert library_index.is_in_library(_book(), "ebook") is True
+    assert provider.fetches == 2
+
+
+def test_a_strict_check_still_refuses_during_the_back_off(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, error=OSError("mount gone"))
+    providers.append(provider)
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+
+    # Inside the back-off nothing is fetched, and the answer must not fall back to "not owned".
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+    assert provider.fetches == 1
+
+
 def test_a_strict_check_refuses_to_guess_when_a_library_is_down_and_nothing_is_cached(
     providers: list[_Provider],
 ) -> None:
