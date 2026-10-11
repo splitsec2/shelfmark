@@ -265,6 +265,8 @@ Seconds since the last WireGuard handshake before the healthcheck bounces the tu
 | `AUDIOBOOK_LIBRARY_URL` | Adds a separate navigation button for your audiobook library (Audiobookshelf, Plex, etc). When both URLs are set, icons are shown instead of text. | string | _none_ |
 | `LIBRARY_CHECK_CALIBRE_ENABLED` | Read the Calibre metadata.db and mark search results you already own, so you do not download a second copy. Read only, nothing is written to the library. | boolean | `false` |
 | `CALIBRE_LIBRARY_DB_PATH` | Path to metadata.db as seen from inside the Shelfmark container. Mount the Calibre library folder read-only, e.g. /path/to/calibre-library:/calibre-library:ro. | string | `/calibre-library/metadata.db` |
+| `CROSS_FORMAT_ABS_TAGGING_ENABLED` | Tag every Audiobookshelf item whose ebook is in Calibre on each sync cycle, and remove the tag when the ebook goes. Needs both library checks and an Audiobookshelf token whose user can update items. | boolean | `false` |
+| `CROSS_FORMAT_ABS_TAG` | The tag written to audiobooks whose ebook is in Calibre. | string | `ebook-in-library` |
 | `SUPPORTED_FORMATS` | Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found. | string (comma-separated) | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
 | `SUPPORTED_AUDIOBOOK_FORMATS` | Audiobook formats to include in search results. ZIP/RAR archives are extracted automatically and audiobook files are used if found. | string (comma-separated) | `m4b,mp3,m4a,mp4,flac,ogg,wma,aac,wav,opus,zip,rar` |
 
@@ -315,6 +317,24 @@ Path to metadata.db as seen from inside the Shelfmark container. Mount the Calib
 
 - **Type:** string
 - **Default:** `/calibre-library/metadata.db`
+
+#### `CROSS_FORMAT_ABS_TAGGING_ENABLED`
+
+**Tag audiobooks whose ebook is in Calibre**
+
+At the end of every sync cycle, tag each Audiobookshelf item whose ebook is in the Calibre library and remove the tag from items whose ebook is gone. Only this tag is ever touched. Needs both library checks on and an Audiobookshelf token whose user has the "Can update" permission. See [Library Check](library-check.md#cross-format-markers).
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `CROSS_FORMAT_ABS_TAG`
+
+**Audiobookshelf tag**
+
+The tag written to audiobooks whose ebook is in Calibre.
+
+- **Type:** string
+- **Default:** `ebook-in-library`
 
 #### `SUPPORTED_FORMATS`
 
