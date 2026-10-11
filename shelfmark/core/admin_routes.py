@@ -31,6 +31,7 @@ from shelfmark.core.auth_modes import (
     normalize_auth_source,
 )
 from shelfmark.core.config import config as app_config
+from shelfmark.core.cross_format_routes import register_cross_format_routes
 from shelfmark.core.cwa_user_sync import connect_cwa_db, sync_cwa_users_from_rows
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import get_session_db_user_id
@@ -500,6 +501,7 @@ def register_admin_routes(
         )
 
     register_admin_settings_routes(app, user_db, _require_admin)
+    register_cross_format_routes(app, _require_admin)
 
     @app.route("/api/admin/users/<int:user_id>", methods=["DELETE"])
     @_require_admin
