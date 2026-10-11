@@ -129,6 +129,20 @@ def test_indexes_titles_authors_series_and_identifiers(
     assert (draft.isbns, draft.asins, draft.external_ids) == (frozenset(), frozenset(), frozenset())
 
 
+def test_entries_carry_the_book_id_title_and_first_author(
+    calibre_library: Callable[..., Path],
+) -> None:
+    calibre_library()
+
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    omens = _by_token(entries, "omens")
+    assert (omens.item_id, omens.title, omens.author) == ("2", "Good Omens", "Terry Pratchett")
+    draft = _by_token(entries, "draft")
+    assert (draft.item_id, draft.title, draft.author) == ("3", "Untitled Draft", "")
+    assert all(entry.tags == frozenset() for entry in entries)
+
+
 def test_reads_a_read_only_file(calibre_library: Callable[..., Path]) -> None:
     path = calibre_library()
     path.chmod(0o444)
