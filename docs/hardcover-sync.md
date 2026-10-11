@@ -45,6 +45,20 @@ When enabled, both shelf sync and automatic downloads look the book up in the li
 
 If a library is unreachable or returns an error, Shelfmark reuses the last successful fetch if it has one. Without one, it does not guess: shelf sync skips that run (requesting now could queue books the library already holds) and automatic download leaves the request pending for the next pass. Search-result badges are the exception and simply show nothing.
 
+### Series gaps
+
+Admins can open **Series gaps** from the activity sidebar header (the stacked-books button). For every series the connected libraries hold, Shelfmark looks the series up on Hardcover and lists the volumes Hardcover knows, with one column per connected format: ebooks from the Calibre library, audiobooks from Audiobookshelf. Each volume is marked per format:
+
+- **owned**: the library matcher finds the book (the same rules as the library check), or the library holds that series at the same position under another title. An omnibus that holds the volume shows as a collection and counts as owned.
+- **requested**: a request for the book exists in any status, from any user, whether it came from Hardcover or another provider. A rejected or cancelled request still counts, so a decision is not undone by the report.
+- **missing**: neither of the above.
+
+A format column only applies to a series the library collects in that format. With an audiobook of volume 1 and no ebooks of the series at all, the ebook column stays blank rather than listing every volume as missing. Tick the missing volumes you want and press **Request selected**: each becomes a pending book-level request owned by the lowest-id admin, exactly as shelf sync creates them, so automatic downloads pick them up and the usual duplicate checks apply. The request carries a note naming the series and position.
+
+Hardcover is asked once per series (one series search and one series fetch) and the answer is kept for a day; a series Hardcover does not know is asked about again after an hour. **Refresh** forgets the cached answers and asks again. Each load spends at most 20 seconds on Hardcover; series it did not reach come back as pending and the page keeps asking until none are left. Hardcover's pacing and 429 back-off apply here as everywhere else.
+
+The series name has to match. The library's series name, packaging words such as "Series" aside, is looked up on Hardcover, and a Hardcover series credited to another author, or whose volumes name another author, is not taken; the report says so under the series. Unreleased volumes and compilations are left out. The report needs the app-level Hardcover token and at least one connected library; if a library cannot be read, the report says so instead of guessing. Series index numbers come from Calibre's series index and from Audiobookshelf's series sequence, falling back to the number in a "Label NN:" title.
+
 ## Per-user accounts
 
 Every user can connect their own Hardcover account instead of sharing one. The token
