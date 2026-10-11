@@ -74,6 +74,28 @@ def _test_calibre_library(current_values: dict[str, Any] | None = None) -> dict[
     return library_index.test_connection("calibre", current_values)
 
 
+def _preview_cross_format_tags(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Action-button callback: dry-run the Audiobookshelf tag sync with the form's values."""
+    from shelfmark.core import cross_format
+
+    try:
+        summary = cross_format.sync_audiobookshelf_tags(dry_run=True, overrides=current_values)
+    except Exception as exc:  # noqa: BLE001 - surface any error to the user
+        return {"success": False, "message": str(exc)}
+    return {"success": True, "message": "Dry run: " + cross_format.describe_summary(summary)}
+
+
+def _apply_cross_format_tags(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Action-button callback: write the Audiobookshelf tags now (uses saved settings)."""
+    from shelfmark.core import cross_format
+
+    try:
+        summary = cross_format.sync_audiobookshelf_tags(dry_run=False)
+    except Exception as exc:  # noqa: BLE001 - surface any error to the user
+        return {"success": False, "message": str(exc)}
+    return {"success": not summary["forbidden"], "message": cross_format.describe_summary(summary)}
+
+
 def _sync_now(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Action-button callback: trigger an immediate sync + auto-download pass."""
     from shelfmark.core import hardcover_scheduler
@@ -292,6 +314,45 @@ def hardcover_sync_settings() -> list[SettingsField]:
             label="Test Calibre library",
             description="Check that Shelfmark can read the Calibre database and count the books.",
             callback=_test_calibre_library,
+        ),
+        HeadingField(
+            key="cross_format_heading",
+            title="Cross-format markers",
+            description=(
+                "Mark works held in both libraries. With both library checks on, each "
+                "sync cycle tags every Audiobookshelf item whose ebook is in Calibre and "
+                "removes the tag again when the ebook goes. Other tags are never touched. "
+                "Calibre is only read; a script can fetch the pairs from "
+                "GET /api/admin/library/cross-format and mark that side with calibredb."
+            ),
+        ),
+        CheckboxField(
+            key="CROSS_FORMAT_ABS_TAGGING_ENABLED",
+            label="Tag audiobooks whose ebook is in Calibre",
+            description=(
+                "Write the tag to Audiobookshelf on every sync cycle. The API token's user "
+                "needs the 'Can update' permission. Off, the preview button still works."
+            ),
+            default=False,
+        ),
+        TextField(
+            key="CROSS_FORMAT_ABS_TAG",
+            label="Audiobookshelf tag",
+            description="The tag to put on audiobooks whose ebook is in Calibre.",
+            default="ebook-in-library",
+            placeholder="ebook-in-library",
+        ),
+        ActionButton(
+            key="preview_cross_format_tags",
+            label="Preview Audiobookshelf tags",
+            description="Count the pairs and list what would change, without writing anything.",
+            callback=_preview_cross_format_tags,
+        ),
+        ActionButton(
+            key="apply_cross_format_tags",
+            label="Apply Audiobookshelf tags now",
+            description="Write the tag changes now (uses saved settings; tagging must be on).",
+            callback=_apply_cross_format_tags,
         ),
         ActionButton(
             key="sync_now",
