@@ -24,7 +24,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from shelfmark.core import search_deadline
 from shelfmark.core.config import config as app_config
+from shelfmark.core.hardcover_scheduler import cycle_expired, cycle_remaining
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.models import QueueStatus
 from shelfmark.core.release_search import search_source_releases
@@ -680,6 +682,19 @@ _SOURCE_PRIORITY_KEYS = {
 }
 
 
+def _search_budget() -> float:
+    """What one request's release search may spend, in seconds.
+
+    The same budget ``/api/releases`` gives a search (``RELEASE_SEARCH_TIMEOUT``), and no
+    more than what is left of the scheduler's cycle. It is what bounds the sources that
+    have no request timeout of their own: a search handed to the browser bypasser can
+    otherwise run for minutes per page.
+    """
+    budget = search_deadline.budget_seconds()
+    remaining = cycle_remaining()
+    return budget if remaining is None else min(budget, remaining)
+
+
 def _configured_source_priority(content_type: str) -> list[str]:
     """Return enabled release-source names for ``content_type`` in configured priority order."""
     from shelfmark.release_sources import list_available_sources
@@ -725,7 +740,6 @@ def auto_download_request(
     admin_user_id: int,
 ) -> AutoDownloadOutcome:
     """Search, strict-match, and queue a single pending request."""
-    from shelfmark.core.requests_service import RequestServiceError, fulfil_request
     from shelfmark.metadata_providers import (
         get_provider,
         get_provider_kwargs,
@@ -800,75 +814,37 @@ def auto_download_request(
     source_errors: list[str] = []
     skipped_pack = False
 
-    # Walk sources in priority order; take the first source with a strict match.
-    for source_name in sources:
-        # The requester's id lets the search plan apply their default languages.
-        _source, releases, search_error = search_source_releases(
-            source_name,
-            book,
-            expand_search=True,
-            content_type=content_type,
-            user_id=coerce_int(request_row.get("user_id"), 0) or None,
-        )
-        if search_error:
-            source_errors.append(f"{source_name}: {search_error}")
-        candidates = [
-            release
-            for release in releases
-            if (release.source, release.source_id) not in failed_releases
-            and strict_match(
-                release,
+    # Walk sources in priority order; take the first source with a strict match. The
+    # whole walk, pack inspections included, shares one search budget, as it does for
+    # a search from the UI: a stuck first source cannot spend the request on its own.
+    with search_deadline.search_deadline(_search_budget()):
+        for source_name in sources:
+            if cycle_expired():
+                source_errors.append(f"{source_name}: the sync cycle ran out of time")
+                break
+            if search_deadline.expired():
+                source_errors.append(f"{source_name}: {search_deadline.deadline_message()}")
+                continue
+            outcome = _try_source(
+                user_db,
+                request_row,
                 book,
+                source_name=source_name,
                 content_type=content_type,
                 min_seeders=min_seeders,
+                queue_release=queue_release,
+                admin_user_id=admin_user_id,
                 audiobook_formats=audiobook_formats,
                 ebook_formats=ebook_formats,
                 languages=languages,
+                failed_releases=failed_releases,
             )
-        ]
-        chosen = None
-        release_data: dict[str, Any] = {}
-        ranked = sorted(candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True)
-        thin = _undersized_copies(ranked, content_type)
-        ranked = _demote_undersized(ranked, content_type)
-        for index, candidate in enumerate(ranked):
-            if index >= MAX_PACK_CHECKS:
-                break  # the best few were all packs; don't queue an uninspected tail
-            data = build_release_data(candidate, book, content_type)
-            is_pack, single_file = _inspect_candidate(data)
-            if is_pack:
-                logger.info("auto-download: skipping multi-book pack %s", candidate.title)
-                skipped_pack = True
-                continue
-            if single_file and candidate not in thin:
-                # One m4b/m4a beats a set of chapter files: no merge step afterwards.
-                chosen, release_data = candidate, data
-                break
-            if chosen is None:
-                chosen, release_data = candidate, data  # best-ranked fallback
-            if content_type != "audiobook" or _audiobook_format(candidate) == "m4b":
-                break  # already as good as it gets; don't inspect the rest
-        if chosen is None:
-            continue
-
-        try:
-            fulfil_request(
-                user_db,
-                request_id=request_id,
-                admin_user_id=admin_user_id,
-                queue_release=queue_release,
-                release_data=release_data,
-            )
-        except RequestServiceError as exc:
-            logger.warning("auto-download: fulfil failed for request %s: %s", request_id, exc)
-            return AutoDownloadOutcome(request_id, "error", str(exc), source=source_name)
-        logger.info(
-            "auto-download: queued request %s from %s (%s)",
-            request_id,
-            source_name,
-            chosen.title,
-        )
-        return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
+            if isinstance(outcome, AutoDownloadOutcome):
+                return outcome
+            search_error, skipped_pack_here = outcome
+            if search_error:
+                source_errors.append(f"{source_name}: {search_error}")
+            skipped_pack = skipped_pack or skipped_pack_here
 
     if source_errors:
         # A source that failed has not said the book is missing.
@@ -881,6 +857,97 @@ def auto_download_request(
         return AutoDownloadOutcome(request_id, "no_match", "only multi-book packs found")
     logger.info("auto-download: no strict match for request %s (%s)", request_id, book.title)
     return AutoDownloadOutcome(request_id, "no_match", "no strict match across sources")
+
+
+def _try_source(
+    user_db: UserDB,
+    request_row: dict[str, Any],
+    book: BookMetadata,
+    *,
+    source_name: str,
+    content_type: str,
+    min_seeders: int,
+    queue_release: Callable[..., tuple[bool, str | None]],
+    admin_user_id: int,
+    audiobook_formats: set[str],
+    ebook_formats: set[str],
+    languages: list[str] | None,
+    failed_releases: set[tuple[str, str]],
+) -> AutoDownloadOutcome | tuple[str | None, bool]:
+    """Search one source for the request and queue its best strict match.
+
+    Returns the outcome when the request is settled (queued, or the fulfilment failed),
+    else ``(search_error, skipped_pack)`` for the caller to carry to the next source.
+    """
+    from shelfmark.core.requests_service import RequestServiceError, fulfil_request
+
+    request_id = int(request_row["id"])
+    # The requester's id lets the search plan apply their default languages.
+    _source, releases, search_error = search_source_releases(
+        source_name,
+        book,
+        expand_search=True,
+        content_type=content_type,
+        user_id=coerce_int(request_row.get("user_id"), 0) or None,
+    )
+    skipped_pack = False
+    candidates = [
+        release
+        for release in releases
+        if (release.source, release.source_id) not in failed_releases
+        and strict_match(
+            release,
+            book,
+            content_type=content_type,
+            min_seeders=min_seeders,
+            audiobook_formats=audiobook_formats,
+            ebook_formats=ebook_formats,
+            languages=languages,
+        )
+    ]
+    chosen = None
+    release_data: dict[str, Any] = {}
+    ranked = sorted(candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True)
+    thin = _undersized_copies(ranked, content_type)
+    ranked = _demote_undersized(ranked, content_type)
+    for index, candidate in enumerate(ranked):
+        if index >= MAX_PACK_CHECKS:
+            break  # the best few were all packs; don't queue an uninspected tail
+        data = build_release_data(candidate, book, content_type)
+        is_pack, single_file = _inspect_candidate(data)
+        if is_pack:
+            logger.info("auto-download: skipping multi-book pack %s", candidate.title)
+            skipped_pack = True
+            continue
+        if single_file and candidate not in thin:
+            # One m4b/m4a beats a set of chapter files: no merge step afterwards.
+            chosen, release_data = candidate, data
+            break
+        if chosen is None:
+            chosen, release_data = candidate, data  # best-ranked fallback
+        if content_type != "audiobook" or _audiobook_format(candidate) == "m4b":
+            break  # already as good as it gets; don't inspect the rest
+    if chosen is None:
+        return search_error, skipped_pack
+
+    try:
+        fulfil_request(
+            user_db,
+            request_id=request_id,
+            admin_user_id=admin_user_id,
+            queue_release=queue_release,
+            release_data=release_data,
+        )
+    except RequestServiceError as exc:
+        logger.warning("auto-download: fulfil failed for request %s: %s", request_id, exc)
+        return AutoDownloadOutcome(request_id, "error", str(exc), source=source_name)
+    logger.info(
+        "auto-download: queued request %s from %s (%s)",
+        request_id,
+        source_name,
+        chosen.title,
+    )
+    return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
 
 
 def auto_download_pending(
@@ -953,6 +1020,15 @@ def auto_download_pending(
         if not sources:
             summary["skipped"] += 1
             continue
+
+        if cycle_expired():
+            logger.warning(
+                "auto-download: cycle out of time; request %s and any after it wait for "
+                "the next cycle",
+                row.get("id"),
+            )
+            summary["error"] += 1
+            break
 
         try:
             outcome = auto_download_request(
