@@ -35,6 +35,7 @@ from shelfmark.core.cwa_user_sync import connect_cwa_db, sync_cwa_users_from_row
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import get_session_db_user_id
 from shelfmark.core.session_auth import SESSION_NONCE_KEY, stamp_session_nonce
+from shelfmark.core.user_settings_overrides import mask_secret_settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -295,7 +296,7 @@ def register_admin_routes(
             user,
             g.auth_mode,
         )
-        result["settings"] = user_db.get_user_settings(user_id)
+        result["settings"] = mask_secret_settings(user_db.get_user_settings(user_id))
         return jsonify(result)
 
     @app.route("/api/admin/users/<int:user_id>", methods=["PUT"])
@@ -452,7 +453,7 @@ def register_admin_routes(
             updated,
             g.auth_mode,
         )
-        result["settings"] = user_db.get_user_settings(user_id)
+        result["settings"] = mask_secret_settings(user_db.get_user_settings(user_id))
         logger.info("Admin updated user %s", user_id)
         return jsonify(result)
 
