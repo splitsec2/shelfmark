@@ -20,7 +20,7 @@ import re
 import sqlite3
 import statistics
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +40,9 @@ from shelfmark.core.text_match import (
     author_surname,
     extra_work_tokens,
     is_bundle_title,
+    normalize_numerals,
+    significant_tokens,
+    strip_alternate_title,
     title_tokens_match,
 )
 from shelfmark.core.text_match import (
@@ -923,6 +926,67 @@ def _configured_source_priority(content_type: str) -> list[str]:
     return [src["name"] for src in available if src.get("enabled")]
 
 
+# Simpler queries tried, in order, when a request's own query finds no strict match.
+MAX_QUERY_VARIANTS = 3
+# "Find Your Why: A Practical Guide..." and "Dune - Deluxe Edition" both name the book
+# before the separator.
+_SUBTITLE_SPLIT = re.compile(r"^(?P<main>.+?)(?:\s*:\s+|\s+-\s+)\S")
+
+
+def _without_subtitle(title: str, book: BookMetadata) -> str:
+    """The title before a ':' or ' - ' subtitle; the title itself when that would not do.
+
+    A prefix that is only series or author words ("Star Wars: Thrawn", "Alex Cross:
+    Kiss the Girls") names a whole series rather than this book, so it is not taken;
+    nor is one followed by only series words (the "Thrawn" series' "Star Wars:
+    Thrawn"), where the prefix is a franchise.
+    Nor is it when the metadata cannot say so: without a series name, or a subtitle
+    the part after the separator holds, "Star Wars: Thrawn" would be searched and
+    matched as "Star Wars".
+    """
+    match = _SUBTITLE_SPLIT.match(title)
+    if not match:
+        return title
+    main = match.group("main").strip()
+    words = set(significant_tokens(main))
+    known = set(significant_tokens(" ".join([book.series_name or "", *(book.authors or [])])))
+    rest = set(significant_tokens(title[len(main) :]))
+    series = set(significant_tokens(book.series_name))
+    if not words or words <= known or (rest and rest <= series):
+        return title
+    subtitle = set(significant_tokens(book.subtitle))
+    confirmed = bool(subtitle) and subtitle <= rest
+    if not (book.series_name or confirmed):
+        return title
+    return main
+
+
+def query_variants(book: BookMetadata) -> list[tuple[str, str]]:
+    """Simpler titles to search when the book's own search title finds no strict match.
+
+    Returns ``(label, title)`` pairs, at most ``MAX_QUERY_VARIANTS``, each different
+    from the title already searched and from the ones before it: the title without a
+    subtitle, without an alternate title (", or There and Back Again"), and with its
+    numbers written as digits. Each is searched and matched as the book's search title,
+    so every strict-match rule still applies to it.
+    """
+    searched = book.search_title or book.title or ""
+    candidates = [
+        ("without subtitle", _without_subtitle(searched, book)),
+        ("without alternate title", strip_alternate_title(searched)),
+        ("numerals as digits", normalize_numerals(searched)),
+    ]
+    seen = {" ".join(searched.lower().split())}
+    variants: list[tuple[str, str]] = []
+    for label, title in candidates:
+        key = " ".join(title.lower().split())
+        if not key or key in seen or not significant_tokens(title):
+            continue
+        seen.add(key)
+        variants.append((label, title.strip()))
+    return variants[:MAX_QUERY_VARIANTS]
+
+
 def auto_download_request(
     user_db: UserDB,
     request_row: dict[str, Any],
@@ -1008,10 +1072,9 @@ def auto_download_request(
     source_errors: list[str] = []
     skipped_pack = False
 
-    # Walk sources in priority order; take the first source with a strict match. The
-    # whole walk, pack inspections included, shares one search budget, as it does for
-    # a search from the UI: a stuck first source cannot spend the request on its own.
-    with search_deadline.search_deadline(_search_budget()):
+    def _walk(searched_book: BookMetadata) -> AutoDownloadOutcome | None:
+        """Search the sources in priority order; the first with a strict match wins."""
+        nonlocal skipped_pack
         for source_name in sources:
             if cycle_expired():
                 source_errors.append(f"{source_name}: the sync cycle ran out of time")
@@ -1022,7 +1085,7 @@ def auto_download_request(
             outcome = _try_source(
                 user_db,
                 request_row,
-                book,
+                searched_book,
                 source_name=source_name,
                 content_type=content_type,
                 min_seeders=min_seeders,
@@ -1039,6 +1102,37 @@ def auto_download_request(
             if search_error:
                 source_errors.append(f"{source_name}: {search_error}")
             skipped_pack = skipped_pack or skipped_pack_here
+        return None
+
+    # The whole walk, pack inspections and simpler queries included, shares one search
+    # budget, as it does for a search from the UI: a stuck first source cannot spend the
+    # request on its own.
+    with search_deadline.search_deadline(_search_budget()):
+        outcome = _walk(book)
+        if outcome is not None:
+            return outcome
+        # Nothing matched the request's own query. Try a few simpler ones, stopping at
+        # the first that yields a strict match; the match rules are the same for each.
+        for label, title in query_variants(book):
+            if cycle_expired() or search_deadline.expired():
+                break
+            logger.info(
+                "auto-download: request %s (%s): no strict match, trying %s: %r",
+                request_id,
+                book.title,
+                label,
+                title,
+            )
+            outcome = _walk(replace(book, search_title=title))
+            if outcome is not None:
+                if outcome.status == "queued":
+                    logger.info(
+                        "auto-download: request %s matched on the query %s: %r",
+                        request_id,
+                        label,
+                        title,
+                    )
+                return outcome
 
     if source_errors:
         # A source that failed has not said the book is missing.
