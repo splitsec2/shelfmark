@@ -476,7 +476,7 @@ class TestCycleTimeout:
             "shelfmark.core.auto_download.auto_download_pending",
             lambda *_a, **_k: {"queued": 0, "error": 0},
         )
-        monkeypatch.setattr(scheduler, "_CYCLE_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(scheduler, "_cycle_timeout", lambda: 0.2)
         _configure(monkeypatch, HARDCOVER_SYNC_ENABLED=True)
         scheduler.configure(_FakeUserDB(), object(), None)
         yield release, seen
@@ -542,3 +542,11 @@ class TestCycleTimeout:
     def test_outside_a_cycle_nothing_is_ever_out_of_time(self):
         assert scheduler.cycle_expired() is False
         assert scheduler.cycle_remaining() is None
+
+
+def test_the_cycle_may_use_most_of_the_interval_but_at_least_an_hour(monkeypatch):
+    _configure(monkeypatch, HARDCOVER_SYNC_INTERVAL=6, HARDCOVER_SYNC_INTERVAL_UNIT="hours")
+    assert scheduler._cycle_timeout() == pytest.approx(0.8 * 6 * 3600)
+
+    _configure(monkeypatch, HARDCOVER_SYNC_INTERVAL=30, HARDCOVER_SYNC_INTERVAL_UNIT="minutes")
+    assert scheduler._cycle_timeout() == scheduler._CYCLE_TIMEOUT_SECONDS
