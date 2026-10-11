@@ -1,10 +1,12 @@
 """Tests for the Hardcover sync scheduler's interval parsing and run gating."""
 
 import threading
+import time
 
 import pytest
 
 from shelfmark.core import hardcover_scheduler as scheduler
+from shelfmark.core.search_deadline import SearchDeadline
 
 
 class _Config:
@@ -453,3 +455,90 @@ class TestStatus:
         status = scheduler.status()
         assert status["healthy"] is False
         assert "no cycle" in status["problems"][0]
+
+
+class TestCycleTimeout:
+    """A cycle that outlives its budget is given up on: the lock frees, the cycle fails."""
+
+    @pytest.fixture
+    def stuck_sync(self, monkeypatch):
+        """A sync that hangs until the test lets it go, noting what it sees on waking."""
+        release = threading.Event()
+        seen = {}
+
+        def _sync(*_args, **_kwargs):
+            seen["woke_in_time"] = release.wait(timeout=5)
+            seen["expired_on_waking"] = scheduler.cycle_expired()
+            return {"added": 1, "errors": 0}
+
+        monkeypatch.setattr("shelfmark.core.hardcover_sync.sync_wishlist", _sync)
+        monkeypatch.setattr(
+            "shelfmark.core.auto_download.auto_download_pending",
+            lambda *_a, **_k: {"queued": 0, "error": 0},
+        )
+        monkeypatch.setattr(scheduler, "_CYCLE_TIMEOUT_SECONDS", 0.2)
+        _configure(monkeypatch, HARDCOVER_SYNC_ENABLED=True)
+        scheduler.configure(_FakeUserDB(), object(), None)
+        yield release, seen
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "HardcoverSyncCycle":
+                thread.join(timeout=5)
+
+    @staticmethod
+    def _worker():
+        return next(t for t in threading.enumerate() if t.name == "HardcoverSyncCycle")
+
+    def test_a_stuck_cycle_releases_the_lock_and_is_a_failed_cycle(self, stuck_sync):
+        release, seen = stuck_sync
+        started = time.monotonic()
+
+        result = scheduler.run_once(force=True)
+
+        assert time.monotonic() - started < 2
+        assert result["status"] == "timeout"
+        assert result["errors"] == 1
+        assert scheduler._run_lock.locked() is False
+        status = scheduler.status()
+        assert status["last_cycle_errors"] == 1
+        assert status["consecutive_failed_cycles"] == 1
+        assert any("1 error" in problem for problem in status["problems"])
+
+        # The abandoned worker was told to stop, and its late result changes nothing.
+        worker = self._worker()
+        release.set()
+        worker.join(timeout=5)
+        assert worker.is_alive() is False
+        assert seen == {"woke_in_time": True, "expired_on_waking": True}
+        assert scheduler.status()["last_cycle_errors"] == 1
+
+    def test_sync_now_is_accepted_again_after_a_stuck_cycle(self, stuck_sync, monkeypatch):
+        scheduler.run_once(force=True)
+
+        monkeypatch.setattr(scheduler, "run_once", lambda **_kwargs: {"status": "ok"})
+        assert scheduler.trigger_async() is True
+
+    def test_the_sweep_stops_at_the_next_account_once_the_cycle_is_out_of_time(self, monkeypatch):
+        user_db = _FakeUserDB([{"id": 1}, {"id": 2}])
+        monkeypatch.setattr("shelfmark.core.hardcover_sync._user_token", lambda _user_id: "token")
+        deadline = SearchDeadline(60.0)
+        synced = []
+
+        def _sync(_user_db, **kwargs):
+            synced.append(kwargs.get("user_id"))
+            deadline.event.set()  # the scheduler gives up while this account is syncing
+            return {"added": 1}
+
+        monkeypatch.setattr("shelfmark.core.hardcover_sync.sync_wishlist", _sync)
+
+        with scheduler._in_cycle(deadline):
+            totals = scheduler._sync_all_accounts(user_db, db_path=None)
+
+        assert synced == [1]  # neither user 2 nor the app-level pass ran
+        assert totals["added"] == 1
+        assert totals["errors"] == 1
+        assert totals["accounts"] == 1
+
+    def test_outside_a_cycle_nothing_is_ever_out_of_time(self):
+        assert scheduler.cycle_expired() is False
+        assert scheduler.cycle_remaining() is None
