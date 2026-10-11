@@ -3,12 +3,47 @@
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-from shelfmark.core.settings_registry import load_config_file
+from shelfmark.core.settings_registry import PasswordField, load_config_file
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import ModuleType
 
+    from shelfmark.core.settings_registry import FieldBase
     from shelfmark.core.user_db import UserDB
+
+# Stands in for a stored PasswordField value in every payload that lists settings.
+# A client that sends it back unchanged on save means "keep what is stored"; the
+# real value is only available through an explicit reveal request.
+SECRET_PLACEHOLDER = "********"  # noqa: S105 - a mask, not a credential
+
+
+def mask_secret_value(field: FieldBase, value: Any) -> Any:
+    """Return the placeholder for a stored PasswordField value, any other value as is."""
+    if isinstance(field, PasswordField) and value not in (None, ""):
+        return SECRET_PLACEHOLDER
+    return value
+
+
+def is_masked_secret(field: FieldBase, value: Any) -> bool:
+    """Whether ``value`` is the placeholder a listing put in place of this secret."""
+    return isinstance(field, PasswordField) and value == SECRET_PLACEHOLDER
+
+
+def is_secret_setting(key: str) -> bool:
+    """Whether ``key`` is a registered PasswordField."""
+    field_map = get_settings_registry().get_settings_field_map()
+    entry = field_map.get(key)
+    return entry is not None and isinstance(entry[0], PasswordField)
+
+
+def mask_secret_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy a per-user settings map with every PasswordField value masked."""
+    field_map = get_settings_registry().get_settings_field_map()
+    return {
+        key: mask_secret_value(field_map[key][0], value) if key in field_map else value
+        for key, value in settings.items()
+    }
 
 
 def get_settings_registry() -> ModuleType:
@@ -59,7 +94,7 @@ def build_user_preferences_payload(user_db: UserDB, user_id: int, tab_name: str)
         )
         fields_payload.append(serialized)
 
-        global_values[key] = app_config.get(key, field.default)
+        global_values[key] = mask_secret_value(field, app_config.get(key, field.default))
 
         source = "default"
         value = app_config.get(key, field.default, user_id=user_id)
@@ -71,11 +106,11 @@ def build_user_preferences_payload(user_db: UserDB, user_id: int, tab_name: str)
         elif key in tab_config:
             source = "global_config"
 
-        effective[key] = {"value": value, "source": source}
+        effective[key] = {"value": mask_secret_value(field, value), "source": source}
 
     user_overrides = {
-        key: user_settings[key]
-        for key in ordered_keys
+        key: mask_secret_value(field, user_settings[key])
+        for key, field in ordered_fields
         if key in user_settings and user_settings[key] is not None
     }
 
