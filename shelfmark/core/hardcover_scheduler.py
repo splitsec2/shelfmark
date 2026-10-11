@@ -50,6 +50,15 @@ _OVERDUE_INTERVALS = 2  # A cycle this many intervals late is reported as a prob
 # "Sync now" work again, and the cycle's own code stops at its next unit of work (see
 # cycle_expired). A thread cannot be killed, so that is the whole of the recovery.
 _CYCLE_TIMEOUT_SECONDS = 3600.0
+# A cycle may use most of the gap between cycles: a long auto-download backlog is slow, not
+# stuck, and tripping the guard on it would report an error every cycle.
+_CYCLE_TIMEOUT_SHARE_OF_INTERVAL = 0.8
+
+
+def _cycle_timeout() -> float:
+    """Seconds one cycle may run: most of the interval, never less than an hour."""
+    return max(_CYCLE_TIMEOUT_SECONDS, _CYCLE_TIMEOUT_SHARE_OF_INTERVAL * _interval_seconds())
+
 
 # The budget of the cycle running in this thread. Only the cycle's worker thread sets it;
 # a route or a test calling the sync directly sees None and is never cut short.
@@ -264,7 +273,7 @@ def run_once(*, force: bool = False) -> dict[str, Any]:
     is in progress.
 
     The cycle runs in a worker thread and is waited on for at most
-    ``_CYCLE_TIMEOUT_SECONDS``. Past that it is reported as ``{"status": "timeout"}``,
+    ``_cycle_timeout()`` (most of the interval, at least an hour). Past that it is reported as ``{"status": "timeout"}``,
     recorded as a failed cycle, and the lock is released; the worker is told to stop at
     its next unit of work and whatever it reports later is ignored.
     """
@@ -279,7 +288,7 @@ def run_once(*, force: bool = False) -> dict[str, Any]:
         if user_db is None or queue_release is None:
             return {"status": "unconfigured"}
 
-        timeout = _CYCLE_TIMEOUT_SECONDS
+        timeout = _cycle_timeout()
         deadline = SearchDeadline(timeout)
         box: dict[str, Any] = {}
         worker = threading.Thread(
