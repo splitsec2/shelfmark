@@ -271,7 +271,9 @@ def _cycle_body(
     sync_summary: dict[str, Any] | None = None
     if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
         sync_summary = _sync_all_accounts(user_db, db_path=db_path)
-    auto_summary = auto_download_pending(user_db, queue_release=queue_release, db_path=db_path)
+    auto_summary = auto_download_pending(
+        user_db, queue_release=queue_release, db_path=db_path, ignore_backoff=force
+    )
     return {
         "status": "ok",
         "sync": sync_summary,
