@@ -163,6 +163,10 @@ Open:
   requests that are still pending
 - [#1439](https://github.com/calibrain/shelfmark/pull/1439) Hardcover rate limiting and 429
   backoff
+- [#1455](https://github.com/calibrain/shelfmark/pull/1455) pin the IRC TLS context to
+  TLS 1.2 or newer
+- [#1459](https://github.com/calibrain/shelfmark/pull/1459) extract RAR archives in place,
+  not in the IO threadpool (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458))
 - Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) admins can't undo a
   rejected request (the fix is ready here, waiting to hear if a PR is wanted)
 
