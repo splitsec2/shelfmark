@@ -227,6 +227,31 @@ def test_provider_error_keeps_answering_from_the_stale_cache(
     assert len(warnings) == 1
 
 
+def test_a_library_that_suddenly_lists_nothing_keeps_answering_from_the_earlier_index(
+    providers: list[_Provider], monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    provider = _Provider("audio", {"audiobook"}, [_DCC_ENTRY])
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "audiobook") is True
+
+    provider.entries = []  # the server's answer changed shape and every item vanished
+    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
+
+    assert library_index.is_in_library(_book(), "audiobook") is True
+    assert library_index.is_in_library(_book(), "audiobook", strict=True) is True
+    assert provider.fetches == 2  # the second answer came from the back-off, not a refetch
+    assert len(warnings) == 1
+    assert "listed no items" in warnings[0]
+
+
+def test_a_library_that_was_never_indexed_may_be_empty(providers: list[_Provider]) -> None:
+    providers.append(_Provider("audio", {"audiobook"}, []))
+
+    assert library_index.is_in_library(_book(), "audiobook") is False
+    assert library_index.is_in_library(_book(), "audiobook", strict=True) is False
+
+
 def test_a_failing_library_is_tried_once_per_search_not_once_per_result(
     providers: list[_Provider], monkeypatch: pytest.MonkeyPatch, clock: list[float]
 ) -> None:

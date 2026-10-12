@@ -142,9 +142,16 @@ def _fetch_library_entries(url: str, token: str, lib_ids: list[str]) -> list[Lib
             )
             resp.raise_for_status()
             data = resp.json()
-            results = data.get("results", []) or []
-            entries.extend(_item_to_entry(item) for item in results)
+            results = data.get("results") if isinstance(data, dict) else None
+            if not isinstance(results, list):
+                # An answer without an item list is not an empty library.
+                msg = f"Audiobookshelf's item list for library {lib_id} has an unexpected shape"
+                raise TypeError(msg)
             total = int(data.get("total", 0) or 0)
+            if page == 0 and not results and total > 0:
+                msg = f"Audiobookshelf reports {total} items in library {lib_id} but listed none"
+                raise ValueError(msg)
+            entries.extend(_item_to_entry(item) for item in results)
             page += 1
             if not results or page * _ITEMS_PAGE_LIMIT >= total:
                 break

@@ -102,6 +102,16 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
         if cached is not None and fresh and unchanged:
             return cached
         entries = provider.fetch_entries()
+        with _lock:
+            had_entries = bool(slot.entries)
+        if had_entries and not entries:
+            # A library that held books a moment ago and now lists none is far more likely a
+            # changed answer from the server than an emptied shelf. Indexing it would make
+            # every owned book look missing, so it is treated like any other failed read
+            # (the earlier index keeps answering, strict callers hold). A library that was
+            # really emptied clears on the next restart.
+            msg = "it listed no items although it held some at the last index"
+            raise ValueError(msg)  # noqa: TRY301 - handled by the failure path below
     except Exception as exc:
         with _lock:
             slot.failed_at = time.monotonic()

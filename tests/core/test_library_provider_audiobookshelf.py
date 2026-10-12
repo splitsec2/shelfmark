@@ -256,15 +256,55 @@ def test_fetch_honours_the_library_id_filter(monkeypatch: pytest.MonkeyPatch) ->
     ]
 
 
-def test_fetch_stops_on_an_empty_page(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_library_that_reports_items_but_lists_none_is_an_error_not_an_empty_library(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = _Session(
         libraries=[{"id": "books", "mediaType": "book"}],
         pages={0: {"results": [], "total": 50}},
     )
     _install(monkeypatch, session)
 
+    with pytest.raises(ValueError, match="reports 50 items"):
+        audiobookshelf._fetch_library_entries("http://abs", "token", [])
+
+
+@pytest.mark.parametrize("payload", [{"total": 3}, {"results": None, "total": 3}, [1, 2]])
+def test_an_item_list_in_an_unexpected_shape_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, payload: Any
+) -> None:
+    session = _Session(
+        libraries=[{"id": "books", "mediaType": "book"}],
+        pages={0: payload},
+    )
+    _install(monkeypatch, session)
+
+    with pytest.raises(TypeError, match="unexpected shape"):
+        audiobookshelf._fetch_library_entries("http://abs", "token", [])
+
+
+def test_a_really_empty_library_indexes_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _Session(
+        libraries=[{"id": "books", "mediaType": "book"}],
+        pages={0: {"results": [], "total": 0}},
+    )
+    _install(monkeypatch, session)
+
     assert audiobookshelf._fetch_library_entries("http://abs", "token", []) == []
-    assert len([url for url, _ in session.calls if url.endswith("/items")]) == 1
+
+
+def test_fetch_stops_on_an_empty_later_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _Session(
+        libraries=[{"id": "books", "mediaType": "book"}],
+        pages={
+            0: {"results": [{"id": "1", "media": {"metadata": {"title": "One"}}}], "total": 50},
+            1: {"results": [], "total": 50},
+        },
+    )
+    _install(monkeypatch, session)
+
+    assert len(audiobookshelf._fetch_library_entries("http://abs", "token", [])) == 1
+    assert len([url for url, _ in session.calls if url.endswith("/items")]) == 2
 
 
 @pytest.mark.parametrize(
