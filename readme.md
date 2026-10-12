@@ -21,6 +21,9 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork |
 | A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork |
 | A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork |
+| An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork |
+| A request an admin handled by hand while a pass was running is skipped instead of searched again and failing | This fork |
+| A request that keeps finding nothing is searched less often: full rate for three passes, then once a day, then every two days, up to `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` (3, and 0 turns it off). A match, or Sync now, starts it over | This fork |
 | Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, sent upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439) |
 | Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork |
 | When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork |
@@ -36,14 +39,17 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo) |
 | Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo) |
 | Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork |
+| A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork |
 
 ### Sources and downloads
 
 | Change | Origin |
 |---|---|
 | Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base, my additions sent as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
+| Soulseek searches wait for slskd to finish and save them before reading the results. They used to come back empty and make slskd's own write fail | Part of upstream PR [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
 | Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) merges |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo) |
+| RAR downloads no longer fail with `child watchers are only available on the default loop` | This fork, sent upstream as [#1459](https://github.com/calibrain/shelfmark/pull/1459) (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458)) |
 
 ### Requests and the activity list (admin)
 
