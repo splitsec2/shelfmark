@@ -22,6 +22,10 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork |
 | A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork |
 | Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, sent upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439) |
+| Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork |
+| When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork |
+| Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork |
+| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks | This fork |
 
 ### Library check
 
@@ -31,6 +35,7 @@ where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf serv
 | A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork |
 | Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo) |
 | Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo) |
+| Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork |
 
 ### Sources and downloads
 
