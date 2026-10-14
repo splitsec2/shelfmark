@@ -10,64 +10,78 @@ Upstream's scope deliberately excludes library integration, automation and colle
 management ([Contributing](#contributing)). This fork adds exactly that layer, for a setup
 where Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf server.
 
+The Origin column says who wrote a change and where it stands upstream: **merged**, **open** (the PR is linked), **not sent yet** (an upstream candidate) or **fork only** (outside upstream's scope, so it is never sent).
+
 ### Hardcover sync and auto-download
 
 | Change | Origin |
 |---|---|
-| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) |
-| *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork |
-| Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork |
-| Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork |
-| Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork |
-| A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork |
-| A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork |
-| An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork |
-| A request an admin handled by hand while a pass was running is skipped instead of searched again and failing | This fork |
-| A request that keeps finding nothing is searched less often: full rate for three passes, then once a day, then every two days, up to `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` (3, and 0 turns it off). A match, or Sync now, starts it over | This fork |
-| Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, sent upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439) |
-| Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork |
-| When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork |
-| Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork |
-| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks | This fork |
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Upstream PR #1047 is still open and not merged. Fork only, by upstream's scope. |
+| *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Fork only |
+| Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
+| Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork. Fork only |
+| Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork. Fork only |
+| A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork. Fork only |
+| A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork. Fork only |
+| An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork. Fork only |
+| A request an admin handled by hand while a pass was running is skipped instead of searched again and failing | This fork. Fork only |
+| A request that keeps finding nothing is searched less often: full rate for three passes, then once a day, then every two days, up to `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` (3, and 0 turns it off). A match, or Sync now, starts it over | This fork. Fork only |
+| Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, open upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439), carried here until it merges |
+| Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork. Fork only |
+| When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork. Fork only |
+| Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork. Fork only |
+| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks | This fork. Fork only |
 
 ### Library check
 
 | Change | Origin |
 |---|---|
-| Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork |
-| A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork |
-| Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo) |
-| Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo) |
-| Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork |
-| A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork |
+| Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork. Fork only |
+| A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork. Fork only for the Audiobookshelf half; the Calibre half is not sent upstream yet |
+| Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo). The Calibre half is not sent upstream yet |
+| Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo). Not sent upstream; it would need a restyle without our per-format pills |
+| Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork. Fork only |
+| A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork. Fork only |
 
 ### Sources and downloads
 
 | Change | Origin |
 |---|---|
-| Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base, my additions sent as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
-| Soulseek searches wait for slskd to finish and save them before reading the results. They used to come back empty and make slskd's own write fail | Part of upstream PR [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
-| Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) merges |
-| AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo) |
-| RAR downloads no longer fail with `child watchers are only available on the default loop` | This fork, sent upstream as [#1459](https://github.com/calibrain/shelfmark/pull/1459) (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458)) |
+| Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base (closed), my additions open upstream as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
+| Soulseek searches wait for slskd to finish and save them before reading the results. They used to come back empty and make slskd's own write fail | Part of [#1428](https://github.com/calibrain/shelfmark/pull/1428), open |
+| Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) (open) merges |
+| AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
+| RAR downloads no longer fail with `child watchers are only available on the default loop` | This fork. Open upstream as [#1459](https://github.com/calibrain/shelfmark/pull/1459) (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458), open) |
+| A queued torrent's first grace no longer depends on how long the host has been up. It was skipped on a host up under 10 minutes, which made CI fail on new PRs | This fork, part of open upstream [#1426](https://github.com/calibrain/shelfmark/pull/1426) (the stall-window setting itself is not in the image) |
 
 ### Requests and the activity list (admin)
 
 | Change | Origin |
 |---|---|
-| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork, raised upstream as issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) |
-| A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork |
-| A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork |
-| The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork |
-| Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork |
-| The browser tab title follows the search page title setting | This fork, upstream candidate |
+| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork. Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) is open and asks whether a PR is wanted; no PR sent |
+| A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
+| A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
+| The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
+| Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; it waits on #1438 and a maintainer ask first |
+| The browser tab title follows the search page title setting | This fork. Not sent upstream yet; first in the send queue |
+| An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. An upstream bug, not sent yet |
+
+### Carried from open upstream PRs
+
+These are in the image today and leave it when upstream merges them. The other open PRs ([#1426](https://github.com/calibrain/shelfmark/pull/1426) apart from its grace fix above, #1431, #1432, #1434, #1435, #1455) are not in the image.
+
+| Change | Origin |
+|---|---|
+| The first terminal status wins, so a late COMPLETE cannot overwrite a cancel | Open upstream as [#1429](https://github.com/calibrain/shelfmark/pull/1429), carried unchanged |
+| A ValueError from a release source is reported as that source's error | Open upstream as [#1433](https://github.com/calibrain/shelfmark/pull/1433), carried unchanged |
+| A failed library index backs off instead of being retried for every result, while sync and auto-download still hold during the back-off instead of reading the library as empty | Open upstream as [#1430](https://github.com/calibrain/shelfmark/pull/1430), adapted here for that last part |
 
 ### Build
 
 | Change | Origin |
 |---|---|
-| Fork-only CI: amd64-only images and no legacy alias job. This one isn't meant for upstream | This fork |
-| Mesa and LLVM are dropped from the image (about 180 MB). Chromium draws WebGL with its own SwiftShader, so they were never used | Ported from [DrNgo/shelfmark-fork@075caff](https://github.com/DrNgo/shelfmark-fork/commit/075caff) by [@DrNgo](https://github.com/DrNgo), the ffmpeg part left out because upstream still uses it |
+| Fork-only CI: amd64-only images and no legacy alias job. This one isn't meant for upstream | This fork. Fork only |
+| Mesa and LLVM are dropped from the image (about 180 MB). Chromium draws WebGL with its own SwiftShader, so they were never used | Ported from [DrNgo/shelfmark-fork@075caff](https://github.com/DrNgo/shelfmark-fork/commit/075caff) by [@DrNgo](https://github.com/DrNgo), the ffmpeg part left out because upstream still uses it. Not sent upstream yet; I'm asking him first whether he wants to send it himself |
 
 Docs for the added features live on the branches that carry them:
 [Hardcover sync](https://github.com/splitsec2/shelfmark/blob/build/fork-images/docs/hardcover-sync.md) ·
