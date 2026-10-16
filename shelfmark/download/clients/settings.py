@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeGuard
 from shelfmark.core.settings_registry import (
     ActionButton,
     HeadingField,
+    NumberField,
     PasswordField,
     SelectField,
     SettingsField,
@@ -938,6 +939,30 @@ def prowlarr_clients_settings() -> list[SettingsField]:
                 {"value": "change_category", "label": "Change Category"},
             ],
             default="keep",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
+        ),
+        NumberField(
+            key="TORRENT_NO_SEEDERS_WAIT",
+            label="Give Up With No Seeders (minutes)",
+            description=(
+                "Stop a torrent that has downloaded nothing for this long while its client "
+                "sees fewer seeds than the minimum below, and mark the download failed so "
+                "another release can be tried. The card shows the seed count and a countdown "
+                "while it waits. 0 keeps the default behaviour (only the stall timer ends it). "
+                "Only qBittorrent reports seed counts."
+            ),
+            default=0,
+            min_value=0,
+            max_value=240,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
+        ),
+        NumberField(
+            key="TORRENT_MIN_SEEDERS",
+            label="Minimum Seeders",
+            description="Seeds the client must see for a motionless torrent to keep waiting.",
+            default=1,
+            min_value=0,
+            max_value=1000,
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
         ),
         TextField(
