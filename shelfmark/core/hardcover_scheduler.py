@@ -259,6 +259,39 @@ def _sync_all_accounts(user_db: UserDB, *, db_path: str | None) -> dict[str, Any
     return totals
 
 
+def _slskd_leftovers(db_path: str | None) -> dict[str, int] | None:
+    """Finish or drop the Soulseek folders and transfers no running download owns.
+
+    The Soulseek source is optional, so a build without it, or slskd not configured, is
+    simply nothing to do. Never raises: it must not fail the cycle.
+    """
+    if not db_path:
+        return None
+    try:
+        from shelfmark.core.download_history_service import DownloadHistoryService
+        from shelfmark.release_sources.slskd import leftovers
+    except ImportError:
+        return None
+    with _ctx_lock:
+        user_db = _ctx.get("user_db")
+    if user_db is None:
+        return None
+    try:
+        report = leftovers.run_with_backend(
+            history_service=DownloadHistoryService(db_path), user_db=user_db
+        )
+    except Exception:
+        logger.exception("Hardcover scheduler: the slskd leftovers sweep failed")
+        return None
+    counts = {
+        "imported": len(report.adopted),
+        "reattached": len(report.reattached),
+        "removed": len(report.removed),
+        "cancelled": len(report.cancelled),
+    }
+    return counts if any(counts.values()) else None
+
+
 def _cycle_body(
     user_db: UserDB,
     queue_release: Callable[..., tuple[bool, str | None]],
@@ -271,15 +304,19 @@ def _cycle_body(
     sync_summary: dict[str, Any] | None = None
     if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
         sync_summary = _sync_all_accounts(user_db, db_path=db_path)
+    leftovers_summary = _slskd_leftovers(db_path)
     auto_summary = auto_download_pending(
         user_db, queue_release=queue_release, db_path=db_path, ignore_backoff=force
     )
-    return {
+    result = {
         "status": "ok",
         "sync": sync_summary,
         "auto_download": auto_summary,
         "cross_format": _tag_audiobookshelf(),
     }
+    if leftovers_summary:
+        result["slskd_leftovers"] = leftovers_summary
+    return result
 
 
 def _run_cycle(deadline: SearchDeadline, box: dict[str, Any], **kwargs: Any) -> None:
