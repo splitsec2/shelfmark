@@ -318,11 +318,14 @@ def _cycle_body(
 ) -> dict[str, Any]:
     from shelfmark.core.auto_download import auto_download_pending
 
+    # Settle what the downloaders still hold before anything is fetched or queued: after a restart
+    # this is the first thing that runs, ahead of the sync (which can take minutes), so work that
+    # outlived its task is picked up or dropped before new downloads take its place.
+    leftovers_summary = _slskd_leftovers(db_path)
+    removed_torrents = _stale_torrents()
     sync_summary: dict[str, Any] | None = None
     if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
         sync_summary = _sync_all_accounts(user_db, db_path=db_path)
-    leftovers_summary = _slskd_leftovers(db_path)
-    removed_torrents = _stale_torrents()
     auto_summary = auto_download_pending(
         user_db, queue_release=queue_release, db_path=db_path, ignore_backoff=force
     )

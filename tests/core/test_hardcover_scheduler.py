@@ -647,3 +647,21 @@ def test_a_dead_torrent_sweep_with_nothing_to_do_or_failing_is_quiet(monkeypatch
     monkeypatch.setitem(sys.modules, "shelfmark.download.stale_torrents", broken)
     monkeypatch.setattr("shelfmark.download.stale_torrents", broken, raising=False)
     assert scheduler._stale_torrents() is None
+
+
+def test_a_cycle_settles_what_the_downloaders_hold_before_it_syncs_or_queues(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(scheduler, "_slskd_leftovers", lambda _p: calls.append("slskd"))
+    monkeypatch.setattr(scheduler, "_stale_torrents", lambda: calls.append("torrents"))
+    monkeypatch.setattr(
+        scheduler, "_sync_all_accounts", lambda *_a, **_k: calls.append("sync") or {}
+    )
+    monkeypatch.setattr(scheduler, "_tag_audiobookshelf", lambda: None)
+    monkeypatch.setattr(
+        "shelfmark.core.auto_download.auto_download_pending",
+        lambda *_a, **_k: calls.append("auto") or {},
+    )
+
+    scheduler._cycle_body(None, lambda *_a, **_k: (True, None), None, force=True)
+
+    assert calls == ["slskd", "torrents", "sync", "auto"]
