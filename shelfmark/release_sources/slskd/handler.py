@@ -391,6 +391,23 @@ def _discard_folder(folder: Path) -> None:
         logger.debug("Could not remove slskd folder %s: %s", folder, e)
 
 
+# Public names for the leftovers sweep, which reads the same settings and folder rules.
+def isolation_enabled() -> bool:
+    return _bool_setting("SLSKD_ISOLATE_DOWNLOADS", True)
+
+
+def destination_prefix() -> str:
+    return _clean_prefix(config.get("SLSKD_DESTINATION_PREFIX", DEFAULT_DESTINATION_PREFIX))
+
+
+def bool_setting(key: str, default: bool) -> bool:
+    return _bool_setting(key, default)
+
+
+def folder_complete(folder: Path, expected_sizes: list[int]) -> bool:
+    return _folder_complete(folder, expected_sizes)
+
+
 def _completed_remote_files(events: list[dict[str, Any]]) -> set[str]:
     """Remote filenames slskd's stored events say finished downloading."""
     done: set[str] = set()
@@ -814,6 +831,7 @@ class SlskdHandler(DownloadHandler):
         # A restart or retry finds the files already there: nothing to download again.
         if _folder_complete(folder, expected):
             logger.info("slskd: %s already holds the files for %s", folder, task.task_id)
+            task.reattached = True
             progress_callback(100.0)
             return self._finish_isolated(task, client, spec.username, [], folder)
         # An earlier attempt's files (a restart, or a cleanup that failed). They are finished,
@@ -862,6 +880,8 @@ class SlskdHandler(DownloadHandler):
         failures = batch["failures"]
         if failures:
             ids, unresolved = self._rejoin_refused(client, spec, ids, failures)
+            if len(unresolved) < len(failures):
+                task.reattached = True  # slskd already had some of the files; they were joined
             if unresolved:
                 first = unresolved[0].get("message") or "unknown reason"
                 status_callback("error", f"slskd refused {len(unresolved)} file(s): {first}")
