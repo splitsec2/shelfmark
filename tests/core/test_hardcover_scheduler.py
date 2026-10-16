@@ -485,3 +485,79 @@ def test_the_cycle_may_use_most_of_the_interval_but_at_least_an_hour(monkeypatch
 
     _configure(monkeypatch, HARDCOVER_SYNC_INTERVAL=30, HARDCOVER_SYNC_INTERVAL_UNIT="minutes")
     assert scheduler._cycle_timeout() == scheduler._CYCLE_TIMEOUT_SECONDS
+
+
+class _Clock:
+    """A clock the scheduler's sleeps move, so a wait that is hours long runs instantly."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def _run_wait(monkeypatch, *, interval, quick, retries):
+    clock = _Clock()
+    monkeypatch.setattr(scheduler.time, "sleep", clock.sleep)
+    monkeypatch.setattr(scheduler.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(scheduler, "_interval_seconds", lambda: interval)
+    monkeypatch.setattr(scheduler, "_quick_retry_interval_seconds", lambda: quick)
+    monkeypatch.setattr(scheduler, "run_quick_retry", lambda: retries.append(clock.now))
+    scheduler._wait_for_next_cycle()
+    return clock
+
+
+def test_the_wait_between_cycles_is_one_sleep_when_the_quick_retry_is_off(monkeypatch):
+    retries: list[float] = []
+
+    clock = _run_wait(monkeypatch, interval=3600.0, quick=0.0, retries=retries)
+
+    assert clock.sleeps == [3600.0]
+    assert retries == []
+
+
+def test_failed_downloads_are_looked_at_between_cycles_when_it_is_on(monkeypatch):
+    retries: list[float] = []
+
+    clock = _run_wait(monkeypatch, interval=3600.0, quick=900.0, retries=retries)
+
+    assert clock.now == 3600.0
+    assert retries == [900.0, 1800.0, 2700.0]  # not again at the cycle itself
+
+
+def test_a_failing_quick_retry_does_not_stop_the_wait(monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(scheduler.time, "sleep", clock.sleep)
+    monkeypatch.setattr(scheduler.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(scheduler, "_interval_seconds", lambda: 3600.0)
+    monkeypatch.setattr(scheduler, "_quick_retry_interval_seconds", lambda: 1800.0)
+
+    def boom():
+        raise RuntimeError("search down")
+
+    monkeypatch.setattr(scheduler, "run_quick_retry", boom)
+
+    scheduler._wait_for_next_cycle()
+
+    assert clock.now == 3600.0
+
+
+def test_the_quick_retry_interval(monkeypatch):
+    monkeypatch.setattr(scheduler, "app_config", FakeConfig(AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES=20))
+    assert scheduler._quick_retry_interval_seconds() == 1200.0
+    monkeypatch.setattr(scheduler, "app_config", FakeConfig())
+    assert scheduler._quick_retry_interval_seconds() == 0.0
+
+
+def test_the_quick_retry_skips_while_a_cycle_holds_the_lock():
+    scheduler._run_lock.acquire()
+    try:
+        assert scheduler.run_quick_retry() is None
+    finally:
+        scheduler._run_lock.release()

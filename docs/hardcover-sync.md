@@ -43,6 +43,10 @@ Hardcover allows a short burst of lookups and then answers 429. Each pass paces 
 
 A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
 
+**Trying another release sooner.** Set **Try another release after a failed download (minutes)** (off by default) and a download that fails, or that is given up on (stalled, or no seeders when **Give Up With No Seeders** is on), does not wait for the days above. Between sync cycles Shelfmark looks for such requests, reopens them after that many minutes and searches again, for those requests only. The release that failed is skipped, and a request is still given up on after three failed attempts.
+
+**Sources known to be dead are tried last.** When choosing among matching releases, a Soulseek peer whose transfers failed in the last three days and who delivered nothing in that time comes after the others. AudiobookBay shows no seed counts, so the comments on its five best posts are read, and a post where comments say it has no seeders comes after the others. Nothing is excluded: if a dead-looking release is the only match, it is still tried.
+
 ### Audiobooks no store sells
 
 Some requested books were never recorded, so no source will ever match them and the request waits in Needs Review for good. With **Mark audiobooks no store sells** on, an audiobook request that has gone **Look the book up after (unmatched passes)** consecutive passes (3 by default) without a strict match is looked up on Audible's US and UK stores, through the metadata search of the Audiobookshelf server set up for the library check (its URL and token are needed; the library check itself can stay off).
@@ -103,6 +107,7 @@ which is what a single-account install keeps doing with no change.
 | `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Audiobook source priority | All usable sources | Drag to order; used for audiobook requests. Sources you disable here, or that are not configured, are skipped |
 | `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
+| `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES` | Try another release after a failed download (minutes) | 0 (off) | Reopens failed or given-up downloads and picks another release this long after, between sync cycles |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | Mark audiobooks no store sells | Off | See [Audiobooks no store sells](#audiobooks-no-store-sells). Needs the Audiobookshelf URL and token |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | Look the book up after (unmatched passes) | 3 | Consecutive passes without a strict match before the stores are asked |
 | `LIBRARY_CHECK_ENABLED` | Skip books already in Audiobookshelf | Off | Applies to both sync and automatic downloads |
