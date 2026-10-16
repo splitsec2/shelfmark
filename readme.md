@@ -69,6 +69,9 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; it waits on #1438 and a maintainer ask first |
 | The browser tab title follows the search page title setting | This fork. Not sent upstream yet; first in the send queue |
 | An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. An upstream bug, not sent yet |
+| A download that reuses the release of another request no longer shows up under that request, with its note and state: the history row moves to the request that queued it. A stale row of a request that already has its book is closed as superseded instead of showing Interrupted | This fork. Not sent yet (an upstream candidate) |
+| Failed, cancelled and interrupted cards load their cover through Shelfmark's cover proxy like running ones. They used the saved external address, which the page's image policy blocks, so the image was broken | This fork. Not sent yet (an upstream candidate) |
+| Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Fork only, since it describes the fork's quick retry |
 
 ### Carried from open upstream PRs
 
