@@ -65,6 +65,12 @@ QUEUE_MAX_WAIT_SECONDS = 7200.0
 # so a dead one still ends 15 minutes after its last movement. One that never moved (a magnet
 # that cannot fetch metadata) keeps the short window and is cleaned up quickly.
 MOVING_STALL_SECONDS = 900.0
+# A torrent that is not moving and has fewer seeds than this is given up on after the wait
+# below (TORRENT_NO_SEEDERS_WAIT, minutes, 0 turns it off). The client's own seed counts decide.
+NO_SEEDERS_WAIT_SETTING = "TORRENT_NO_SEEDERS_WAIT"
+MIN_SEEDERS_SETTING = "TORRENT_MIN_SEEDERS"
+NO_SEEDERS_WAIT_DEFAULT_MINUTES = 0.0
+MIN_SEEDERS_DEFAULT = 1
 WINDOWS_DRIVE_PREFIX_LENGTH = 2
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -220,6 +226,28 @@ class ExternalClientHandler(DownloadHandler, ABC):
     def _poll_interval(self) -> float:
         """Return the polling interval for status checks."""
         return POLL_INTERVAL
+
+    def _no_seeders_wait_seconds(self) -> float:
+        """How long a motionless torrent with too few seeds is kept (seconds, 0 = never give up)."""
+        configured = config.get(NO_SEEDERS_WAIT_SETTING, NO_SEEDERS_WAIT_DEFAULT_MINUTES)
+        try:
+            minutes = float(configured)
+        except TypeError, ValueError:
+            return 0.0
+        return minutes * SECONDS_PER_MINUTE if minutes > 0 else 0.0
+
+    def _min_seeders(self) -> int:
+        configured = config.get(MIN_SEEDERS_SETTING, MIN_SEEDERS_DEFAULT)
+        try:
+            return max(int(configured), 0)
+        except TypeError, ValueError:
+            return MIN_SEEDERS_DEFAULT
+
+    @staticmethod
+    def _seed_count(status: DownloadStatus) -> int | None:
+        """The most seeds the client can see, connected or reported by the tracker; None if it says nothing."""
+        counts = [c for c in (status.seeders, status.swarm_seeders) if c is not None]
+        return max(counts) if counts else None
 
     def _completed_path_retry_interval(self) -> float:
         """Retry interval while waiting for completed files (seconds)."""
@@ -786,6 +814,17 @@ class ExternalClientHandler(DownloadHandler, ABC):
 
         return None, last_error
 
+    @staticmethod
+    def _seed_note(seeds: int | None, give_up_in: float | None) -> str:
+        """What the card shows beside progress so nobody has to open the client to see the swarm."""
+        if seeds is None:
+            return ""
+        note = f" · {seeds} seed{'s' if seeds != 1 else ''}"
+        if give_up_in is not None and give_up_in > 0:
+            minutes_left = max(math.ceil(give_up_in / SECONDS_PER_MINUTE), 1)
+            note += f", giving up in {minutes_left}m"
+        return note
+
     def _build_progress_message(self, status: DownloadStatus) -> str:
         """Build a progress message from download status."""
         msg = f"{status.progress:.0f}%"
@@ -991,6 +1030,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         grace_requested_at: float | None = None
         last_progress = 0.0
         start_window_given = False
+        no_seeders_since: float | None = None
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
@@ -1091,6 +1131,41 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     queued_since = None
                     grace_requested_at = None
 
+                no_seeders_left: float | None = None
+                no_seeders_wait = self._no_seeders_wait_seconds()
+                min_seeders = self._min_seeders()
+                seeds = self._seed_count(status)
+                if (
+                    no_seeders_wait > 0
+                    and status.state == DownloadState.DOWNLOADING
+                    and seeds is not None
+                    and seeds < min_seeders
+                    and status.progress <= last_progress
+                ):
+                    now = time.monotonic()
+                    if no_seeders_since is None:
+                        no_seeders_since = now
+                    no_seeders_left = no_seeders_wait - (now - no_seeders_since)
+                    if no_seeders_left <= 0:
+                        logger.warning(
+                            "Giving up on %s (%s): %s seeders found, %s needed, no progress for %.0f min",
+                            client.name,
+                            download_id,
+                            seeds,
+                            min_seeders,
+                            no_seeders_wait / SECONDS_PER_MINUTE,
+                        )
+                        if added_by_shelfmark:
+                            self._remove_unstarted_torrent(client, download_id)
+                        status_callback(
+                            "error",
+                            f"No seeders: {seeds} found, {min_seeders} needed, "
+                            f"nothing downloaded in {no_seeders_wait / SECONDS_PER_MINUTE:g} min",
+                        )
+                        return None
+                else:
+                    no_seeders_since = None
+
                 if status.progress > last_progress:
                     request_activity_grace(status_callback, MOVING_STALL_SECONDS)
                     start_window_given = True
@@ -1103,6 +1178,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
 
                 # Build status message - use client message if provided, else build progress
                 msg = status.message or self._build_progress_message(status)
+                msg += self._seed_note(seeds, no_seeders_left)
                 if status.state == DownloadState.PROCESSING:
                     # Post-processing (e.g., SABnzbd verifying/extracting)
                     status_callback("resolving", msg)
