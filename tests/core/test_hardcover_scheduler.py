@@ -622,3 +622,33 @@ def test_a_failing_slskd_sweep_does_not_fail_the_cycle(monkeypatch, tmp_path):
     monkeypatch.setattr("shelfmark.release_sources.slskd.leftovers", fake, raising=False)
 
     assert scheduler._slskd_leftovers(db_path) is None
+
+
+def test_the_dead_torrent_sweep_reports_only_what_it_removed(monkeypatch):
+    import types
+
+    fake = types.SimpleNamespace(
+        run_for_shelfmark=lambda: types.SimpleNamespace(removed=["Dead Book"])
+    )
+    monkeypatch.setattr("shelfmark.download.stale_torrents", fake, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "shelfmark.download.stale_torrents", fake)
+
+    assert scheduler._stale_torrents() == ["Dead Book"]
+
+
+def test_a_dead_torrent_sweep_with_nothing_to_do_or_failing_is_quiet(monkeypatch):
+    import sys
+    import types
+
+    nothing = types.SimpleNamespace(run_for_shelfmark=lambda: types.SimpleNamespace(removed=[]))
+    monkeypatch.setitem(sys.modules, "shelfmark.download.stale_torrents", nothing)
+    monkeypatch.setattr("shelfmark.download.stale_torrents", nothing, raising=False)
+    assert scheduler._stale_torrents() is None
+
+    def boom():
+        raise RuntimeError("qbittorrent down")
+
+    broken = types.SimpleNamespace(run_for_shelfmark=boom)
+    monkeypatch.setitem(sys.modules, "shelfmark.download.stale_torrents", broken)
+    monkeypatch.setattr("shelfmark.download.stale_torrents", broken, raising=False)
+    assert scheduler._stale_torrents() is None
