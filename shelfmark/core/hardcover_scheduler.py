@@ -293,6 +293,23 @@ def _slskd_leftovers(db_path: str | None) -> dict[str, int] | None:
     return counts if any(counts.values()) else None
 
 
+def _stale_torrents() -> list[str] | None:
+    """Remove the dead torrents nothing is watching, when that sweep is present and switched on.
+
+    Never raises: it must not fail the cycle.
+    """
+    try:
+        from shelfmark.download import stale_torrents
+    except ImportError:
+        return None
+    try:
+        removed = stale_torrents.run_for_shelfmark().removed
+    except Exception:
+        logger.exception("Hardcover scheduler: the dead torrent sweep failed")
+        return None
+    return removed or None
+
+
 def _cycle_body(
     user_db: UserDB,
     queue_release: Callable[..., tuple[bool, str | None]],
@@ -306,6 +323,7 @@ def _cycle_body(
     if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
         sync_summary = _sync_all_accounts(user_db, db_path=db_path)
     leftovers_summary = _slskd_leftovers(db_path)
+    removed_torrents = _stale_torrents()
     auto_summary = auto_download_pending(
         user_db, queue_release=queue_release, db_path=db_path, ignore_backoff=force
     )
@@ -317,6 +335,8 @@ def _cycle_body(
     }
     if leftovers_summary:
         result["slskd_leftovers"] = leftovers_summary
+    if removed_torrents:
+        result["dead_torrents_removed"] = removed_torrents
     return result
 
 
