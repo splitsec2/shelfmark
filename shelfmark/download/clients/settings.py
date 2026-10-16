@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeGuard
 from shelfmark.core.settings_registry import (
     ActionButton,
     HeadingField,
+    NumberField,
     PasswordField,
     SelectField,
     SettingsField,
@@ -947,6 +948,21 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             placeholder="imported",
             default="",
             show_when={"field": "PROWLARR_TORRENT_ACTION", "value": "change_category"},
+        ),
+        NumberField(
+            key="STALE_TORRENT_HOURS",
+            label="Remove dead torrents after (hours)",
+            description=(
+                "Remove a torrent from Shelfmark's categories when it is stalled or cannot "
+                "fetch its metadata, has had no activity for this many hours, and no running "
+                "download owns it. Its partial data goes with it. Torrents still downloading, "
+                "queued, or finished are never touched. 0 keeps them. Checked at each sync "
+                "cycle; only qBittorrent is supported."
+            ),
+            default=0,
+            min_value=0,
+            max_value=720,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
         ),
         # --- Usenet Client Selection ---
         HeadingField(
