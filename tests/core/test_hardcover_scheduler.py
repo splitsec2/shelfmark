@@ -592,3 +592,59 @@ def test_the_cycle_may_use_most_of_the_interval_but_at_least_an_hour(monkeypatch
 
     _configure(monkeypatch, HARDCOVER_SYNC_INTERVAL=30, HARDCOVER_SYNC_INTERVAL_UNIT="minutes")
     assert scheduler._cycle_timeout() == scheduler._CYCLE_TIMEOUT_SECONDS
+
+
+def test_the_slskd_sweep_is_nothing_to_do_without_a_database_path():
+    assert scheduler._slskd_leftovers(None) is None
+
+
+def test_the_slskd_sweep_reports_only_what_it_did(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from shelfmark.core.user_db import UserDB
+
+    db_path = str(tmp_path / "users.db")
+    user_db = UserDB(db_path)
+    user_db.initialize()
+    scheduler.configure(user_db, lambda *a, **k: (True, None), db_path)
+
+    class _Report:
+        adopted = ["a"]
+        reattached: list[str] = []
+        removed = ["b", "c"]
+        cancelled: list[str] = []
+
+    fake = types.ModuleType("shelfmark.release_sources.slskd.leftovers")
+    fake.run_with_backend = lambda **_kw: _Report()
+    monkeypatch.setitem(sys.modules, "shelfmark.release_sources.slskd.leftovers", fake)
+    monkeypatch.setattr("shelfmark.release_sources.slskd.leftovers", fake, raising=False)
+
+    assert scheduler._slskd_leftovers(db_path) == {
+        "imported": 1,
+        "reattached": 0,
+        "removed": 2,
+        "cancelled": 0,
+    }
+
+
+def test_a_failing_slskd_sweep_does_not_fail_the_cycle(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from shelfmark.core.user_db import UserDB
+
+    db_path = str(tmp_path / "users.db")
+    user_db = UserDB(db_path)
+    user_db.initialize()
+    scheduler.configure(user_db, lambda *a, **k: (True, None), db_path)
+
+    def boom(**_kw):
+        raise RuntimeError("slskd down")
+
+    fake = types.ModuleType("shelfmark.release_sources.slskd.leftovers")
+    fake.run_with_backend = boom
+    monkeypatch.setitem(sys.modules, "shelfmark.release_sources.slskd.leftovers", fake)
+    monkeypatch.setattr("shelfmark.release_sources.slskd.leftovers", fake, raising=False)
+
+    assert scheduler._slskd_leftovers(db_path) is None
