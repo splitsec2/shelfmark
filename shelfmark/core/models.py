@@ -162,6 +162,10 @@ class DownloadTask:
     download_path: str | None = None
     last_error_message: str | None = None
     last_error_type: str | None = None
+
+    # True while the download client has this task's torrent in its own queue, waiting for a
+    # free slot. Such a task does no work yet, so it does not count against its source's limit.
+    client_queued: bool = False
     staged_path: str | None = None
 
     def __lt__(self, other: DownloadTask) -> bool:
