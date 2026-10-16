@@ -84,3 +84,61 @@ def test_the_buckets_are_rewritten_without_touching_the_original_payload():
     assert status["error"]["t"]["status_message"].startswith("The Soulseek peer dropped")
     assert original["status_message"] == "Peer transfer failed: Errored"
     assert status["complete"]["c"]["status_message"] == "x"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            'Failed to add to slskd: 500 Server Error: Internal Server Error for url: http://x/batches ("Failed to connect to user u: Failed to establish a direct or indirect message connection to u (1.2.3.4:5)")',
+            "Could not reach the Soulseek peer, directly or through the Soulseek server (tried twice). "
+            "Another copy will be tried in about 20 minutes.",
+        ),
+        (
+            'Failed to add to slskd: 500 Server Error for url: http://x/batches ("The wait timed out after 5000 milliseconds")',
+            "The Soulseek peer did not answer slskd's queue request (tried twice). "
+            "Another copy will be tried in about 20 minutes.",
+        ),
+        (
+            'Failed to add to slskd: 500 Server Error for url: http://x/batches ("The peer is banned")',
+            "slskd would not queue the download (tried twice). "
+            "Another copy will be tried in about 20 minutes.",
+        ),
+        (
+            "Download failed: TypeError",
+            "The download hit an internal error (TypeError). "
+            "Another copy will be tried in about 20 minutes.",
+        ),
+        (
+            "Retrying after a 20-minute cooldown (failed; delivery was queued)",
+            "Retrying automatically after a failed download.",
+        ),
+    ],
+)
+def test_slskd_and_internal_failures_say_what_went_wrong(raw, expected):
+    assert _explain(raw) == expected
+
+
+def test_a_request_reopened_after_a_restart_says_it_will_be_tried_again():
+    from shelfmark.core.status_messages import explain_request_rows
+
+    out = explain_request_rows([{"id": 1, "last_failure_reason": "Interrupted by a restart"}])
+
+    assert out[0]["last_failure_reason"] == "Interrupted by a restart; it will be tried again."
+
+
+def test_request_failure_reasons_are_explained_on_copies():
+    from shelfmark.core.status_messages import explain_request_rows
+
+    rows = [
+        {"id": 1, "last_failure_reason": "Download failed: TypeError"},
+        {"id": 2, "last_failure_reason": None},
+        {"id": 3},
+    ]
+
+    out = explain_request_rows(rows)
+
+    assert out[0]["last_failure_reason"].startswith("The download hit an internal error")
+    assert out[1]["last_failure_reason"] is None
+    assert "last_failure_reason" not in out[2]
+    assert rows[0]["last_failure_reason"] == "Download failed: TypeError"  # untouched
