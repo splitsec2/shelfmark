@@ -22,6 +22,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork. Fork only |
 | Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork. Fork only |
 | A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days | This fork. Fork only |
+| A download that fails or is given up on can be retried with another release within minutes instead of days (`AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES`, off by default), searching only those requests between sync cycles. A Soulseek peer whose recent transfers all failed, and an AudiobookBay post whose comments say it has no seeders, are tried after the other matches | This fork. Fork only |
 | A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork. Fork only |
 | An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork. Fork only |
 | A request an admin handled by hand while a pass was running is skipped instead of searched again and failing | This fork. Fork only |
@@ -52,6 +53,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) (open) merges |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
 | RAR downloads no longer fail with `child watchers are only available on the default loop` | This fork. Open upstream as [#1459](https://github.com/calibrain/shelfmark/pull/1459) (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458), open) |
+| A torrent whose client sees no seed at all for a set time, or too few seeds while nothing is downloading, is removed and marked failed so another release is tried (`TORRENT_NO_SEEDERS_WAIT`, off by default, qBittorrent only). The card shows the seed count and a countdown, so nobody has to open the client | This fork. Not sent yet (an upstream candidate) |
 | A queued torrent's first grace no longer depends on how long the host has been up. It was skipped on a host up under 10 minutes, which made CI fail on new PRs | This fork, part of open upstream [#1426](https://github.com/calibrain/shelfmark/pull/1426) (the stall-window setting itself is not in the image) |
 
 ### Requests and the activity list (admin)
@@ -59,6 +61,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Change | Origin |
 |---|---|
 | An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork. Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) is open and asks whether a PR is wanted; no PR sent |
+| An admin can also reopen a request whose download failed or was cancelled. The release that failed is remembered on the request so the next search skips it, and the same happens when a failed download reopens its request by itself | This fork. Fork only |
 | A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
 | A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
 | The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
