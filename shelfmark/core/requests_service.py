@@ -496,6 +496,31 @@ def reject_request(
         raise RequestServiceError(str(exc), status_code=409, code="stale_transition") from exc
 
 
+def _book_data_with_failed_release(request_row: dict[str, Any]) -> dict[str, Any] | None:
+    """The request's book data with its fulfilling release added to ``failed_releases``.
+
+    None when there is nothing to add: no readable release, or it is already listed.
+    """
+    book_data = request_row.get("book_data")
+    release_data = request_row.get("release_data")
+    if not isinstance(book_data, dict) or not isinstance(release_data, dict):
+        return None
+    source = str(release_data.get("source") or "").strip()
+    source_id = str(release_data.get("source_id") or "").strip()
+    if not source or not source_id:
+        return None
+    tried = book_data.get("failed_releases")
+    tried = list(tried) if isinstance(tried, list) else []
+    if any(
+        isinstance(entry, dict)
+        and entry.get("source") == source
+        and entry.get("source_id") == source_id
+        for entry in tried
+    ):
+        return None
+    return {**book_data, "failed_releases": [*tried, {"source": source, "source_id": source_id}]}
+
+
 def reopen_request(
     user_db: UserDB,
     *,
@@ -538,13 +563,20 @@ def reopen_request(
 
     if delivery_failed:
         # The chosen release is cleared, so the next pass searches again; the failure
-        # reason says who asked for it.
+        # reason says who asked for it. The release that failed is remembered on the request
+        # first, so the next search does not pick it again.
+        failed_book_data = _book_data_with_failed_release(request_row)
         reopened = user_db.reopen_failed_request(
             request_id,
             failure_reason=normalized_admin_note or "Reopened by an admin after a failed download",
         )
-        if reopened is not None and normalized_admin_note is not None:
-            reopened = user_db.update_request(request_id, admin_note=normalized_admin_note)
+        if reopened is not None and (failed_book_data is not None or normalized_admin_note):
+            updates: dict[str, Any] = {}
+            if failed_book_data is not None:
+                updates["book_data"] = failed_book_data
+            if normalized_admin_note is not None:
+                updates["admin_note"] = normalized_admin_note
+            reopened = user_db.update_request(request_id, **updates)
     else:
         reopened = user_db.reopen_rejected_request(request_id, admin_note=normalized_admin_note)
     if reopened is None:

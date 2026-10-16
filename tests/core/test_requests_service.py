@@ -1872,6 +1872,33 @@ def test_reopen_request_reopens_a_fulfilled_request_whose_download_failed(user_d
     assert reopened["last_failure_reason"] == "[auto] retry"
 
 
+def test_reopen_request_remembers_the_release_that_failed(user_db):
+    request_id, admin = _fulfilled_request(user_db, delivery_state="cancelled")
+
+    reopened = reopen_request(user_db, request_id=request_id, admin_user_id=admin["id"])
+
+    assert reopened["release_data"] is None
+    assert reopened["book_data"]["failed_releases"] == [
+        {"source": "prowlarr", "source_id": "release-123"}
+    ]
+
+
+def test_reopen_request_does_not_list_a_failed_release_twice(user_db):
+    request_id, admin = _fulfilled_request(user_db, delivery_state="error")
+    row = user_db.get_request(request_id)
+    book_data = {
+        **row["book_data"],
+        "failed_releases": [{"source": "prowlarr", "source_id": "release-123"}],
+    }
+    user_db.update_request(request_id, book_data=book_data)
+
+    reopened = reopen_request(user_db, request_id=request_id, admin_user_id=admin["id"])
+
+    assert reopened["book_data"]["failed_releases"] == [
+        {"source": "prowlarr", "source_id": "release-123"}
+    ]
+
+
 @pytest.mark.parametrize("delivery_state", ["complete", "queued"])
 def test_reopen_request_refuses_a_fulfilled_request_that_is_delivered_or_in_flight(
     user_db, delivery_state
