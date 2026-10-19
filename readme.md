@@ -31,7 +31,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork. Fork only |
 | When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork. Fork only |
 | Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork. Fork only |
-| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks | This fork. Fork only |
+| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks. A series with ebooks and no audiobooks can still have its audiobooks requested, and Hardcover's duplicate or mis-credited listings of a series are passed over for the real one | This fork. Fork only |
 
 ### Library check
 
