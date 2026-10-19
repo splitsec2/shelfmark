@@ -3327,3 +3327,238 @@ class TestDeadSources:
         ranked = [_release(source="prowlarr", source_id="x")]
 
         assert auto_download._demote_dead_sources(ranked, frozenset()) == ranked
+
+
+class TestSharedDeadReleases:
+    """A torrent that stalled for one request is not offered again to another."""
+
+    def _history(self, user_db, task_id, status, message, *, source="audiobookbay"):
+        service = DownloadHistoryService(user_db._db_path)
+        service.record_download(
+            task_id=task_id,
+            user_id=None,
+            username=None,
+            request_id=None,
+            source=source,
+            source_display_name=None,
+            title="A release",
+            author=None,
+            file_format=None,
+            size=None,
+            preview=None,
+            content_type="audiobook",
+            downloads=None,
+            origin="requested",
+            retry_payload=None,
+        )
+        service.finalize_download(task_id=task_id, final_status=status, status_message=message)
+
+    def _dead(self, user_db):
+        return auto_download.recent_dead_releases(user_db._db_path)
+
+    def test_a_stalled_release_is_dead(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+
+        assert self._dead(user_db) == {("audiobookbay", "abc")}
+
+    def test_a_release_with_no_seeders_is_dead(self, user_db):
+        self._history(user_db, "abc", "error", "No seeders: 0 found, 1 needed, for 5 min (0%)")
+
+        assert self._dead(user_db) == {("audiobookbay", "abc")}
+
+    def test_a_release_that_also_completed_is_not(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+        self._history(user_db, "abc", "complete", "Complete")
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_a_person_cancelling_does_not_count(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Downloading")
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_soulseek_is_left_to_the_dead_peer_rule(self, user_db):
+        self._history(
+            user_db, "slskd:1", "error", "Download stalled (no activity for 300s)", source="slskd"
+        )
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_old_failures_are_forgotten(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+
+        later = datetime.now(UTC) + timedelta(days=auto_download.DEAD_RELEASE_DAYS + 1)
+        assert auto_download.recent_dead_releases(user_db._db_path, now=later) == frozenset()
+
+    def test_no_history_database_means_none_dead(self):
+        assert auto_download.recent_dead_releases(None) == frozenset()
+
+    def test_another_requests_dead_release_is_not_picked(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        row = _pending_request(user_db, admin["id"])
+        _stub_provider(monkeypatch, _book())
+        dead = _release(source="prowlarr", source_id="dead", seeders=99)
+        good = _release(source="prowlarr", source_id="good", seeders=1)
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, [dead, good], None)
+        )
+        queued: list[str] = []
+
+        def _queue(release_data, _priority, *, user_id, username):
+            queued.append(release_data["source_id"])
+            return True, None
+
+        outcome = auto_download.auto_download_request(
+            user_db,
+            user_db.get_request(row["id"]),
+            sources=["prowlarr"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=_queue,
+            admin_user_id=admin["id"],
+            dead_releases=frozenset({("prowlarr", "dead")}),
+        )
+
+        assert outcome.status == "queued"
+        assert queued == ["good"]
+
+
+class TestSettleDeliveryStatesFromHistory:
+    """A request still saying downloading is corrected from history once the download ended."""
+
+    def _fulfilled(self, user_db, *, state, delivery_updated_at):
+        admin = user_db.create_user(username="admin", role="admin")
+        row = _pending_request(user_db, admin["id"])
+        user_db.update_request(
+            row["id"],
+            status="fulfilled",
+            delivery_state=state,
+            delivery_updated_at=delivery_updated_at,
+            release_data={"source": "audiobookbay", "source_id": "rel1"},
+        )
+        return row["id"]
+
+    def _record(self, user_db, request_id, status, message, *, ended):
+        service = DownloadHistoryService(user_db._db_path)
+        service.record_download(
+            task_id=f"t{request_id}{status}",
+            user_id=None,
+            username=None,
+            request_id=request_id,
+            source="audiobookbay",
+            source_display_name=None,
+            title="A book",
+            author=None,
+            file_format=None,
+            size=None,
+            preview=None,
+            content_type="audiobook",
+            downloads=None,
+            origin="requested",
+            retry_payload=None,
+        )
+        service.finalize_download(
+            task_id=f"t{request_id}{status}", final_status=status, status_message=message
+        )
+        with sqlite3.connect(user_db._db_path) as conn:
+            conn.execute(
+                "UPDATE download_history SET terminal_at = ? WHERE task_id = ?",
+                (ended, f"t{request_id}{status}"),
+            )
+
+    def _state(self, user_db, request_id):
+        return user_db.get_request(request_id)["delivery_state"]
+
+    def test_a_cancelled_task_moves_the_request_off_downloading(self, user_db):
+        rid = self._fulfilled(
+            user_db, state="downloading", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+        self._record(
+            user_db,
+            rid,
+            "cancelled",
+            "Download stalled (no activity for 300s)",
+            ended="2026-10-18T19:49:23+00:00",
+        )
+
+        assert (
+            auto_download.settle_delivery_states_from_history(user_db, db_path=user_db._db_path)
+            == 1
+        )
+        assert self._state(user_db, rid) == "cancelled"
+
+    def test_a_row_that_ended_before_the_request_last_changed_is_left_alone(self, user_db):
+        rid = self._fulfilled(
+            user_db, state="queued", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+        self._record(
+            user_db, rid, "error", "Peer transfer failed", ended="2026-10-10T00:00:00+00:00"
+        )
+
+        assert (
+            auto_download.settle_delivery_states_from_history(user_db, db_path=user_db._db_path)
+            == 0
+        )
+        assert self._state(user_db, rid) == "queued"
+
+    def test_a_row_still_active_is_left_alone(self, user_db):
+        rid = self._fulfilled(
+            user_db, state="downloading", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+        DownloadHistoryService(user_db._db_path).record_download(
+            task_id="live",
+            user_id=None,
+            username=None,
+            request_id=rid,
+            source="audiobookbay",
+            source_display_name=None,
+            title="A book",
+            author=None,
+            file_format=None,
+            size=None,
+            preview=None,
+            content_type="audiobook",
+            downloads=None,
+            origin="requested",
+            retry_payload=None,
+        )
+
+        assert (
+            auto_download.settle_delivery_states_from_history(user_db, db_path=user_db._db_path)
+            == 0
+        )
+        assert self._state(user_db, rid) == "downloading"
+
+    def test_a_request_without_history_is_left_alone(self, user_db):
+        rid = self._fulfilled(
+            user_db, state="queued", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+
+        assert (
+            auto_download.settle_delivery_states_from_history(user_db, db_path=user_db._db_path)
+            == 0
+        )
+        assert self._state(user_db, rid) == "queued"
+
+    def test_the_stale_sweep_then_reopens_a_stalled_download(self, user_db):
+        rid = self._fulfilled(
+            user_db, state="downloading", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+        self._record(
+            user_db,
+            rid,
+            "cancelled",
+            "Download stalled (no activity for 300s)",
+            ended="2026-10-18T19:49:23+00:00",
+        )
+
+        reopened = auto_download.reopen_stale_failures(
+            user_db,
+            cooldown_days=0,
+            db_path=user_db._db_path,
+            provider_filter=None,
+            failure_cooldown=timedelta(minutes=20),
+        )
+
+        assert reopened == 1
+        assert user_db.get_request(rid)["status"] == "pending"
