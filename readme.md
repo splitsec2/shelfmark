@@ -49,24 +49,24 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 |---|---|
 | A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Not sent yet (an upstream candidate) |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
-| A torrent whose client sees no seed at all for a set time, or too few seeds while nothing is downloading, is removed and marked failed so another release is tried (`TORRENT_NO_SEEDERS_WAIT`, off by default, qBittorrent only). The card shows the seed count and a countdown, so nobody has to open the client | This fork. Not sent yet (an upstream candidate) |
-| Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (off by default, qBittorrent only), and owned by no running download | This fork. Not sent yet (an upstream candidate) |
-| Downloads are limited per source (`MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`, 0 keeps the single global limit), so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. A source that is full does not lose its place in the queue, and a task whose torrent waits in qBittorrent's own queue does not use up its source's limit | This fork. Not sent yet (an upstream candidate) |
+| A torrent whose client sees no seed at all for a set time, or too few seeds while nothing is downloading, is removed and marked failed so another release is tried (`TORRENT_NO_SEEDERS_WAIT`, off by default, qBittorrent only). The card shows the seed count and a countdown, so nobody has to open the client | This fork. Open upstream as [#1494](https://github.com/calibrain/shelfmark/pull/1494) |
+| Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (off by default, qBittorrent only), and owned by no running download | This fork. Fork only for now: it is called from the sync cycle's scheduler, which upstream doesn't have |
+| Downloads are limited per source (`MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`, 0 keeps the single global limit), so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. A source that is full does not lose its place in the queue, and a task whose torrent waits in qBittorrent's own queue does not use up its source's limit | This fork. Open upstream as [#1495](https://github.com/calibrain/shelfmark/pull/1495) |
 | Soulseek leftovers (checked at the start of each sync cycle, before the sync and the auto-download pass): a download folder holding every file whose import an interruption cut off is imported without downloading again, partial folders are removed after `SLSKD_CLEAN_LEFTOVERS_DAYS`, and unfinished slskd transfers no running download owns are picked up again when their request still waits for them, or cancelled | This fork. Not sent yet (an upstream candidate, after #1428) |
 
 ### Requests and the activity list (admin)
 
 | Change | Origin |
 |---|---|
-| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork. Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) is open and asks whether a PR is wanted; no PR sent |
+| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork. Open upstream as [#1491](https://github.com/calibrain/shelfmark/pull/1491), after issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) |
 | An admin can also reopen a request whose download failed or was cancelled. The release that failed is remembered on the request so the next search skips it, and the same happens when a failed download reopens its request by itself | This fork. Fork only |
 | A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
 | A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
 | The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
 | Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; a maintainer ask comes first (#1438, which it builds on, has merged) |
-| The browser tab title follows the search page title setting | This fork. Not sent upstream yet; first in the send queue |
-| An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. An upstream bug, not sent yet |
-| A download that reuses the release of another request no longer shows up under that request, with its note and state: the history row moves to the request that queued it. A stale row of a request that already has its book is closed as superseded instead of showing Interrupted | This fork. Not sent yet (an upstream candidate) |
+| The browser tab title follows the search page title setting | This fork. Open upstream as [#1492](https://github.com/calibrain/shelfmark/pull/1492) |
+| An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. Open upstream as [#1493](https://github.com/calibrain/shelfmark/pull/1493) |
+| A download that reuses the release of another request no longer shows up under that request, with its note and state: the history row moves to the request that queued it. A stale row of a request that already has its book is closed as superseded instead of showing Interrupted | This fork. Open upstream as [#1496](https://github.com/calibrain/shelfmark/pull/1496) |
 | Failed, cancelled and interrupted cards load their cover through Shelfmark's cover proxy like running ones. They used the saved external address, which the page's image policy blocks, so the image was broken | This fork. Not sent yet (an upstream candidate) |
 | A download that picks up work already under way (a torrent the client had, files already on disk, slskd transfers it rejoins) shows a Reattached pill | This fork. Fork only for the pill; the flag on the task is an upstream candidate, not sent yet |
 | Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Fork only |
@@ -181,8 +181,17 @@ Merged since:
 
 Open:
 
-- Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) admins can't undo a
-  rejected request (the fix is ready here, waiting to hear if a PR is wanted)
+- [#1491](https://github.com/calibrain/shelfmark/pull/1491) an admin can reopen a rejected
+  request (from issue [#1445](https://github.com/calibrain/shelfmark/issues/1445))
+- [#1492](https://github.com/calibrain/shelfmark/pull/1492) the browser tab follows the
+  search page title
+- [#1493](https://github.com/calibrain/shelfmark/pull/1493) an older failed attempt no
+  longer undoes a later delivery
+- [#1494](https://github.com/calibrain/shelfmark/pull/1494) give up on a torrent with no
+  seeders
+- [#1495](https://github.com/calibrain/shelfmark/pull/1495) a concurrency limit per source
+- [#1496](https://github.com/calibrain/shelfmark/pull/1496) a reused release follows the new
+  request, and stale rows of a delivered request are closed
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
