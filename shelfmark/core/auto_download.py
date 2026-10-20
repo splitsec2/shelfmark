@@ -696,14 +696,69 @@ def recent_failed_peers(
     return frozenset(failed - delivered)
 
 
-# A torrent release that stalled or had no seeders is not offered again to any request for this
-# long. Soulseek failures are about a peer, not a release, and are handled by the dead-peer rule.
-DEAD_RELEASE_DAYS = 14
+# A release that failed is not offered again for this long, then it is tried once more: a torrent
+# that stalled can be revived by new seeds, and a failure may simply have been a bad hour.
+FAILED_RELEASE_RETRY_DAYS_SETTING = "AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS"
+DEFAULT_FAILED_RELEASE_RETRY_DAYS = 7
+# A torrent release that stalled or had no seeders is not offered to ANY request in that time.
+# Soulseek failures are about a peer, not a release, and are handled by the dead-peer rule.
 _DEAD_RELEASE_MESSAGES = ("download stalled", "no seeders")
+# Rows that say nothing about the release: the process stopped, or a later download replaced it.
+_NOT_THE_RELEASES_FAULT = ("interrupted", "superseded")
+
+
+def failed_release_retry_days() -> int:
+    """Days a failed release is kept out before it may be picked again (at least 1)."""
+    return max(
+        coerce_int(
+            app_config.get(FAILED_RELEASE_RETRY_DAYS_SETTING, DEFAULT_FAILED_RELEASE_RETRY_DAYS),
+            DEFAULT_FAILED_RELEASE_RETRY_DAYS,
+        ),
+        1,
+    )
+
+
+def recent_failed_releases(
+    db_path: str | None, *, now: datetime | None = None, days: int | None = None
+) -> frozenset[tuple[str, str]]:
+    """Releases (source, source_id) whose latest download failed within the last ``days``.
+
+    The history row of a release is the one place its failure time is recorded, so a failure
+    older than that no longer counts against the release, whatever a request remembers. A release
+    that completed in the window is not failed.
+    """
+    if not db_path:
+        return frozenset()
+    window = failed_release_retry_days() if days is None else days
+    since = ((now or datetime.now(UTC)) - timedelta(days=window)).isoformat(timespec="seconds")
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT task_id, source, final_status, status_message FROM download_history "
+                "WHERE COALESCE(terminal_at, queued_at) >= ?",
+                (since,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.debug("auto-download: could not read recent failed releases: %s", exc)
+        return frozenset()
+    failed: set[tuple[str, str]] = set()
+    delivered: set[tuple[str, str]] = set()
+    for task_id, source, final_status, message in rows:
+        key = (str(source), str(task_id))
+        if final_status == "complete":
+            delivered.add(key)
+        elif final_status in ("cancelled", "error") and not str(message or "").lower().startswith(
+            _NOT_THE_RELEASES_FAULT
+        ):
+            failed.add(key)
+    return frozenset(failed - delivered)
 
 
 def recent_dead_releases(
-    db_path: str | None, *, now: datetime | None = None, days: int = DEAD_RELEASE_DAYS
+    db_path: str | None, *, now: datetime | None = None, days: int | None = None
 ) -> frozenset[tuple[str, str]]:
     """Releases (source, source_id) that stalled or had no seeders in the last ``days``.
 
@@ -713,7 +768,8 @@ def recent_dead_releases(
     """
     if not db_path:
         return frozenset()
-    since = ((now or datetime.now(UTC)) - timedelta(days=days)).isoformat(timespec="seconds")
+    window = failed_release_retry_days() if days is None else days
+    since = ((now or datetime.now(UTC)) - timedelta(days=window)).isoformat(timespec="seconds")
     try:
         conn = sqlite3.connect(db_path)
         try:
@@ -1358,6 +1414,7 @@ def auto_download_request(
     providers: dict[str, Any] | None = None,
     dead_peers: frozenset[str] = frozenset(),
     dead_releases: frozenset[tuple[str, str]] = frozenset(),
+    recent_failures: frozenset[tuple[str, str]] | None = None,
 ) -> AutoDownloadOutcome:
     """Search, strict-match, and queue a single pending request.
 
@@ -1440,8 +1497,12 @@ def auto_download_request(
     audiobook_formats = _audiobook_formats()
     ebook_formats = _ebook_formats()
     languages = _wanted_languages(coerce_int(request_row.get("user_id"), 0) or None)
-    # Releases that already failed for this request, so a retry does not pick the same one.
-    failed_releases = _failed_release_keys(book_data) | dead_releases
+    # Releases that already failed for this request, so a retry does not pick the same one. Only
+    # those whose failure is recent: an older one is given another chance (None keeps all).
+    remembered = _failed_release_keys(book_data)
+    if recent_failures is not None:
+        remembered &= recent_failures
+    failed_releases = remembered | dead_releases
     source_errors: list[str] = []
     skipped_pack = False
 
@@ -1732,6 +1793,8 @@ def auto_download_pending(
 
     dead_peers = recent_failed_peers(db_path)
     dead_releases = recent_dead_releases(db_path)
+    # Without a history to read there is no way to tell how old a failure is, so all count.
+    recent_failures = recent_failed_releases(db_path) if db_path else None
     for row in pending:
         if only_request_ids is not None and int(row["id"]) not in only_request_ids:
             continue
@@ -1788,6 +1851,7 @@ def auto_download_pending(
                 providers=providers,
                 dead_peers=dead_peers,
                 dead_releases=dead_releases,
+                recent_failures=recent_failures,
             )
         except Exception:
             # One bad request must not take the rest of the pass with it.

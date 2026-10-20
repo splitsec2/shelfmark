@@ -108,6 +108,7 @@ which is what a single-account install keeps doing with no change.
 | `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
 | `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES` | Try another release after a failed download (minutes) | 0 (off) | Reopens failed or given-up downloads and picks another release this long after, between sync cycles |
+| `AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS` | Try a failed release again after (days) | 7 | A release that failed or stalled is kept out of the search for this long, then may be picked again; a request is still given up on after three failed attempts |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | Mark audiobooks no store sells | Off | See [Audiobooks no store sells](#audiobooks-no-store-sells). Needs the Audiobookshelf URL and token |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | Look the book up after (unmatched passes) | 3 | Consecutive passes without a strict match before the stores are asked |
 | `LIBRARY_CHECK_ENABLED` | Skip books already in Audiobookshelf | Off | Applies to both sync and automatic downloads |
