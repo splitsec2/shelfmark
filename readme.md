@@ -192,6 +192,8 @@ Open:
 - [#1495](https://github.com/calibrain/shelfmark/pull/1495) a concurrency limit per source
 - [#1496](https://github.com/calibrain/shelfmark/pull/1496) a reused release follows the new
   request, and stale rows of a delivered request are closed
+- [#1498](https://github.com/calibrain/shelfmark/pull/1498) read the stall window setting with a
+  type check instead of a pyright ignore
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
