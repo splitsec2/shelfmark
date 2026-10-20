@@ -19,6 +19,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Upstream PR #1047 is still open and not merged. Fork only, by upstream's scope. |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Fork only |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
+| Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
 | Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork. Fork only |
 | Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork. Fork only |
 | A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days. A torrent that stalled or had no seeders for one request is skipped for every request for 14 days, and a request still showing queued or downloading after its download ended is corrected from the history, so the retry no longer waits for someone to open the page | This fork. Fork only |
@@ -72,6 +73,14 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Fork only |
 | The Requests view says what is automatic and what is for a person: a decision the automation made reads "Declined automatically" or "Automatic: ..." instead of naming the admin account it acted through, "Needs Review" is "No Match Yet" with a line saying the search repeats on every sync and what the admin can do, and a request reopened after a failed download sits under "Retrying Automatically". Failure reasons use plain words | This fork. Fork only |
 | Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Fork only, since it describes the fork's quick retry |
+
+### Carried from open upstream PRs
+
+These are in the image today and leave it when upstream merges them.
+
+| Change | Origin |
+|---|---|
+| Only an admin may use the instance's Hardcover account: its lists in the List filter, the add and remove actions and the read status on search results, which every user could use before (issue [#981](https://github.com/calibrain/shelfmark/issues/981)) | Open upstream as [#1501](https://github.com/calibrain/shelfmark/pull/1501), carried unchanged |
 
 ### Build
 
@@ -194,6 +203,8 @@ Open:
   request, and stale rows of a delivered request are closed
 - [#1498](https://github.com/calibrain/shelfmark/pull/1498) read the stall window setting with a
   type check instead of a pyright ignore
+- [#1501](https://github.com/calibrain/shelfmark/pull/1501) only an admin may use the provider's own
+  account, its Hardcover lists and shelves (issue [#981](https://github.com/calibrain/shelfmark/issues/981))
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
