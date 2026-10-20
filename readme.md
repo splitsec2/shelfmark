@@ -205,6 +205,15 @@ Open:
   type check instead of a pyright ignore
 - [#1501](https://github.com/calibrain/shelfmark/pull/1501) only an admin may use the provider's own
   account, its Hardcover lists and shelves (issue [#981](https://github.com/calibrain/shelfmark/issues/981))
+- [#1503](https://github.com/calibrain/shelfmark/pull/1503) seed time and ratio settings for
+  AudiobookBay (issue [#1037](https://github.com/calibrain/shelfmark/issues/1037))
+- [#1504](https://github.com/calibrain/shelfmark/pull/1504) hide Prowlarr ebook results above a
+  maximum size (issue [#844](https://github.com/calibrain/shelfmark/issues/844))
+- [#1505](https://github.com/calibrain/shelfmark/pull/1505) key the cover cache by the image URL
+- [#1506](https://github.com/calibrain/shelfmark/pull/1506) apply the request policy to release
+  listing, not only to download
+- [#1507](https://github.com/calibrain/shelfmark/pull/1507) answer another user's item like a
+  missing one, and skip foreign history rows
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
