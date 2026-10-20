@@ -22,7 +22,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
 | Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork. Fork only |
 | Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork. Fork only |
-| A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days. A torrent that stalled or had no seeders for one request is skipped for every request for 14 days, and a request still showing queued or downloading after its download ended is corrected from the history, so the retry no longer waits for someone to open the page | This fork. Fork only |
+| A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days. A release that failed or stalled is kept out of the search for 7 days (`AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS`) and then tried again, and one that stalled or had no seeders for one request is skipped for every request in that time, and a request still showing queued or downloading after its download ended is corrected from the history, so the retry no longer waits for someone to open the page | This fork. Fork only |
 | A download that fails or is given up on can be retried with another release within minutes instead of days (`AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES`, off by default), searching only those requests between sync cycles. A Soulseek peer whose recent transfers all failed or that never answered the queue request, and an AudiobookBay post whose comments say it has no seeders, are tried after the other matches | This fork. Fork only |
 | A request whose book is already in the library is closed with the note `[auto] Already in the library.` instead of sitting in Needs Review and being looked up every pass | This fork. Fork only |
 | An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork. Fork only |
@@ -81,6 +81,7 @@ These are in the image today and leave it when upstream merges them.
 | Change | Origin |
 |---|---|
 | Only an admin may use the instance's Hardcover account: its lists in the List filter, the add and remove actions and the read status on search results, which every user could use before (issue [#981](https://github.com/calibrain/shelfmark/issues/981)) | Open upstream as [#1501](https://github.com/calibrain/shelfmark/pull/1501), carried unchanged |
+| Clear Completed leaves out a request or download that is no longer finished instead of failing the whole batch with "Only terminal requests can be dismissed" | Open upstream as [#1508](https://github.com/calibrain/shelfmark/pull/1508), carried unchanged |
 
 ### Build
 
@@ -205,6 +206,8 @@ Open:
   type check instead of a pyright ignore
 - [#1501](https://github.com/calibrain/shelfmark/pull/1501) only an admin may use the provider's own
   account, its Hardcover lists and shelves (issue [#981](https://github.com/calibrain/shelfmark/issues/981))
+- [#1508](https://github.com/calibrain/shelfmark/pull/1508) Clear Completed skips an item that is
+  no longer finished instead of failing the batch
 - [#1503](https://github.com/calibrain/shelfmark/pull/1503) seed time and ratio settings for
   AudiobookBay (issue [#1037](https://github.com/calibrain/shelfmark/issues/1037))
 - [#1504](https://github.com/calibrain/shelfmark/pull/1504) hide Prowlarr ebook results above a
