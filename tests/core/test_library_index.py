@@ -261,7 +261,7 @@ def test_a_failing_library_is_tried_once_per_search_not_once_per_result(
 
     provider.error = RuntimeError("boom")
     clock[0] += library_index._CACHE_TTL_SECONDS + 1
-    warnings = _warnings(monkeypatch)
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
 
     for _ in range(40):  # one search page, every result asks
         assert library_index.is_in_library(_book(), "ebook") is True
