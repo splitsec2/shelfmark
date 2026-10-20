@@ -27,7 +27,6 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | An archive (RAR, ZIP, 7z and so on) never matches an audiobook request, since nothing unattended should unpack one whose contents it can't see. Pick it by hand if you want it | This fork. Fork only |
 | A request an admin handled by hand while a pass was running is skipped instead of searched again and failing | This fork. Fork only |
 | A request that keeps finding nothing is searched less often: full rate for three passes, then once a day, then every two days, up to `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` (3, and 0 turns it off). A match, or Sync now, starts it over | This fork. Fork only |
-| Hardcover requests are paced and back off on 429, and a throttled lookup counts as an error rather than "book not found" | This fork, open upstream as [#1439](https://github.com/calibrain/shelfmark/pull/1439), carried here until it merges |
 | Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork. Fork only |
 | When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork. Fork only |
 | Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork. Fork only |
@@ -48,17 +47,12 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| Soulseek (slskd) as a release source, with downloads kept apart from other slskd users and peers ranked by queue and speed | Upstream PR [#1335](https://github.com/calibrain/shelfmark/pull/1335) by [@dskvr](https://github.com/dskvr) as the base (closed), my additions open upstream as [#1428](https://github.com/calibrain/shelfmark/pull/1428) |
-| Soulseek searches wait for slskd to finish and save them before reading the results. They used to come back empty and make slskd's own write fail | Part of [#1428](https://github.com/calibrain/shelfmark/pull/1428), open |
-| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Not sent yet (an upstream candidate, after #1428) |
-| Clear Completed leaves out requests that are still pending (it used to fail the whole batch) | Carried until upstream [#1438](https://github.com/calibrain/shelfmark/pull/1438) (open) merges |
+| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Not sent yet (an upstream candidate) |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
-| RAR downloads no longer fail with `child watchers are only available on the default loop` | This fork. Open upstream as [#1459](https://github.com/calibrain/shelfmark/pull/1459) (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458), open) |
 | A torrent whose client sees no seed at all for a set time, or too few seeds while nothing is downloading, is removed and marked failed so another release is tried (`TORRENT_NO_SEEDERS_WAIT`, off by default, qBittorrent only). The card shows the seed count and a countdown, so nobody has to open the client | This fork. Not sent yet (an upstream candidate) |
 | Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (off by default, qBittorrent only), and owned by no running download | This fork. Not sent yet (an upstream candidate) |
 | Downloads are limited per source (`MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`, 0 keeps the single global limit), so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. A source that is full does not lose its place in the queue, and a task whose torrent waits in qBittorrent's own queue does not use up its source's limit | This fork. Not sent yet (an upstream candidate) |
 | Soulseek leftovers (checked at the start of each sync cycle, before the sync and the auto-download pass): a download folder holding every file whose import an interruption cut off is imported without downloading again, partial folders are removed after `SLSKD_CLEAN_LEFTOVERS_DAYS`, and unfinished slskd transfers no running download owns are picked up again when their request still waits for them, or cancelled | This fork. Not sent yet (an upstream candidate, after #1428) |
-| A queued torrent's first grace no longer depends on how long the host has been up. It was skipped on a host up under 10 minutes, which made CI fail on new PRs | This fork, part of open upstream [#1426](https://github.com/calibrain/shelfmark/pull/1426) (the stall-window setting itself is not in the image) |
 
 ### Requests and the activity list (admin)
 
@@ -69,7 +63,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
 | A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
 | The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
-| Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; it waits on #1438 and a maintainer ask first |
+| Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; a maintainer ask comes first (#1438, which it builds on, has merged) |
 | The browser tab title follows the search page title setting | This fork. Not sent upstream yet; first in the send queue |
 | An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. An upstream bug, not sent yet |
 | A download that reuses the release of another request no longer shows up under that request, with its note and state: the history row moves to the request that queued it. A stale row of a request that already has its book is closed as superseded instead of showing Interrupted | This fork. Not sent yet (an upstream candidate) |
@@ -78,16 +72,6 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Fork only |
 | The Requests view says what is automatic and what is for a person: a decision the automation made reads "Declined automatically" or "Automatic: ..." instead of naming the admin account it acted through, "Needs Review" is "No Match Yet" with a line saying the search repeats on every sync and what the admin can do, and a request reopened after a failed download sits under "Retrying Automatically". Failure reasons use plain words | This fork. Fork only |
 | Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Fork only, since it describes the fork's quick retry |
-
-### Carried from open upstream PRs
-
-These are in the image today and leave it when upstream merges them. The other open PRs ([#1426](https://github.com/calibrain/shelfmark/pull/1426) apart from its grace fix above, #1431, #1432, #1434, #1435, #1455) are not in the image.
-
-| Change | Origin |
-|---|---|
-| The first terminal status wins, so a late COMPLETE cannot overwrite a cancel | Open upstream as [#1429](https://github.com/calibrain/shelfmark/pull/1429), carried unchanged |
-| A ValueError from a release source is reported as that source's error | Open upstream as [#1433](https://github.com/calibrain/shelfmark/pull/1433), carried unchanged |
-| A failed library index backs off instead of being retried for every result, while sync and auto-download still hold during the back-off instead of reading the library as empty | Open upstream as [#1430](https://github.com/calibrain/shelfmark/pull/1430), adapted here for that last part |
 
 ### Build
 
@@ -103,7 +87,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Twenty-two have merged so far.
+there rather than living in this fork. Thirty-five have merged so far.
 
 Features, refactors and auth:
 
@@ -166,7 +150,7 @@ The fail-open auth defect that [DrNgo/shelfmark-fork](https://github.com/DrNgo/s
 fixed was fixed upstream in [#1397](https://github.com/calibrain/shelfmark/pull/1397), so this
 fork no longer carries its own copy.
 
-Open:
+Merged since:
 
 - [#1426](https://github.com/calibrain/shelfmark/pull/1426) make the torrent stall window a
   setting
@@ -194,6 +178,9 @@ Open:
   TLS 1.2 or newer
 - [#1459](https://github.com/calibrain/shelfmark/pull/1459) extract RAR archives in place,
   not in the IO threadpool (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458))
+
+Open:
+
 - Issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) admins can't undo a
   rejected request (the fix is ready here, waiting to hear if a PR is wanted)
 
