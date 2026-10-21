@@ -16,7 +16,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Upstream PR #1047 is still open and not merged. Fork only, by upstream's scope. |
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Upstream PR #1047 is still open and not merged. I have offered on the PR to carry it as a new one built from this rebase, in small pieces, and am waiting to hear. Fork only, by upstream's scope. |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Fork only |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
 | Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
@@ -50,38 +50,22 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 |---|---|
 | A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Not sent yet (an upstream candidate) |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
-| A torrent whose client sees no seed at all for a set time, or too few seeds while nothing is downloading, is removed and marked failed so another release is tried (`TORRENT_NO_SEEDERS_WAIT`, off by default, qBittorrent only). The card shows the seed count and a countdown, so nobody has to open the client | This fork. Open upstream as [#1494](https://github.com/calibrain/shelfmark/pull/1494) |
 | Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (off by default, qBittorrent only), and owned by no running download | This fork. Fork only for now: it is called from the sync cycle's scheduler, which upstream doesn't have |
-| Downloads are limited per source (`MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`, 0 keeps the single global limit), so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. A source that is full does not lose its place in the queue, and a task whose torrent waits in qBittorrent's own queue does not use up its source's limit | This fork. Open upstream as [#1495](https://github.com/calibrain/shelfmark/pull/1495) |
 | Soulseek leftovers (checked at the start of each sync cycle, before the sync and the auto-download pass): a download folder holding every file whose import an interruption cut off is imported without downloading again, partial folders are removed after `SLSKD_CLEAN_LEFTOVERS_DAYS`, and unfinished slskd transfers no running download owns are picked up again when their request still waits for them, or cancelled | This fork. Fork only for now: it runs from the sync cycle's scheduler, which upstream doesn't have |
 
 ### Requests and the activity list (admin)
 
 | Change | Origin |
 |---|---|
-| An admin can reopen a rejected request. Rejected was final before, and the Hardcover sync never re-creates a book that already has a request | This fork. Open upstream as [#1491](https://github.com/calibrain/shelfmark/pull/1491), after issue [#1445](https://github.com/calibrain/shelfmark/issues/1445) |
 | An admin can also reopen a request whose download failed or was cancelled. The release that failed is remembered on the request so the next search skips it, and the same happens when a failed download reopens its request by itself | This fork. Fork only |
 | A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
 | A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
 | The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
 | Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; a maintainer ask comes first (#1438, which it builds on, has merged) |
-| The browser tab title follows the search page title setting | This fork. Open upstream as [#1492](https://github.com/calibrain/shelfmark/pull/1492) |
-| An older failed attempt no longer sets a delivered request back to error and reopens it. It happened to a request whose first try failed and whose retry succeeded | This fork. Open upstream as [#1493](https://github.com/calibrain/shelfmark/pull/1493) |
-| A download that reuses the release of another request no longer shows up under that request, with its note and state: the history row moves to the request that queued it. A stale row of a request that already has its book is closed as superseded instead of showing Interrupted | This fork. Open upstream as [#1496](https://github.com/calibrain/shelfmark/pull/1496) |
-| Failed, cancelled and interrupted cards load their cover through Shelfmark's cover proxy like running ones. They used the saved external address, which the page's image policy blocks, so the image was broken | This fork. Part of open upstream [#1496](https://github.com/calibrain/shelfmark/pull/1496) |
 | A download that picks up work already under way (a torrent the client had, files already on disk, slskd transfers it rejoins) shows a Reattached pill | This fork. Fork only for the pill; the flag on the task is an upstream candidate, not sent yet |
 | Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Fork only |
 | The Requests view says what is automatic and what is for a person: a decision the automation made reads "Declined automatically" or "Automatic: ..." instead of naming the admin account it acted through, "Needs Review" is "No Match Yet" with a line saying the search repeats on every sync and what the admin can do, and a request reopened after a failed download sits under "Retrying Automatically". Failure reasons use plain words | This fork. Fork only |
 | Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Fork only, since it describes the fork's quick retry |
-
-### Carried from open upstream PRs
-
-These are in the image today and leave it when upstream merges them.
-
-| Change | Origin |
-|---|---|
-| Only an admin may use the instance's Hardcover account: its lists in the List filter, the add and remove actions and the read status on search results, which every user could use before (issue [#981](https://github.com/calibrain/shelfmark/issues/981)) | Open upstream as [#1501](https://github.com/calibrain/shelfmark/pull/1501), carried unchanged |
-| Clear Completed leaves out a request or download that is no longer finished instead of failing the whole batch with "Only terminal requests can be dismissed" | Open upstream as [#1508](https://github.com/calibrain/shelfmark/pull/1508), carried unchanged |
 
 ### Build
 
@@ -97,7 +81,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Thirty-five have merged so far.
+there rather than living in this fork. Forty-nine have merged so far.
 
 Features, refactors and auth:
 
@@ -189,7 +173,7 @@ Merged since:
 - [#1459](https://github.com/calibrain/shelfmark/pull/1459) extract RAR archives in place,
   not in the IO threadpool (issue [#1458](https://github.com/calibrain/shelfmark/issues/1458))
 
-Open:
+Merged on October 20, a batch of fourteen:
 
 - [#1491](https://github.com/calibrain/shelfmark/pull/1491) an admin can reopen a rejected
   request (from issue [#1445](https://github.com/calibrain/shelfmark/issues/1445))
@@ -218,7 +202,7 @@ Open:
 - [#1507](https://github.com/calibrain/shelfmark/pull/1507) answer another user's item like a
   missing one, and skip foreign history rows
 
-The rest of the feature branches stay here because upstream has said this class of feature
+None of my pull requests is open upstream right now. The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
 The Audiobookshelf provider is the clearest example: it rides the same provider interface
 as the Calibre one, but it is a new service integration rather than something already in
