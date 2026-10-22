@@ -16,7 +16,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Upstream PR #1047 is still open and not merged. I have offered on the PR to carry it as a new one built from this rebase, in small pieces, and am waiting to hear. Fork only, by upstream's scope. |
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Replaced upstream by [#1516](https://github.com/calibrain/shelfmark/pull/1516) (1 of 8) and [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 8, the Audiobookshelf library check), both open. Calibrain asked for the rest of the Hardcover work to be stacked on #1516. |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Fork only |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
 | Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
@@ -42,7 +42,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo). The Calibre half is not sent upstream yet |
 | Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo). Not sent upstream; it would need a restyle without our per-format pills |
 | Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork. Fork only |
-| A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork. Fork only |
+| A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork. Open upstream in [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 8) |
 
 ### Sources and downloads
 
@@ -81,7 +81,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Forty-nine have merged so far.
+there rather than living in this fork. Fifty-one have merged so far.
 
 Features, refactors and auth:
 
@@ -202,7 +202,21 @@ Merged on October 20, a batch of fourteen:
 - [#1507](https://github.com/calibrain/shelfmark/pull/1507) answer another user's item like a
   missing one, and skip foreign history rows
 
-None of my pull requests is open upstream right now. The rest of the feature branches stay here because upstream has said this class of feature
+Merged on October 21, after that batch:
+
+- [#1513](https://github.com/calibrain/shelfmark/pull/1513) put dismiss-many back together after
+  the #1507 and #1508 merges
+- [#1514](https://github.com/calibrain/shelfmark/pull/1514) drop three unused imports that fail
+  Python Quality
+
+Open:
+
+- [#1516](https://github.com/calibrain/shelfmark/pull/1516) (1 of 8) optional Hardcover wishlist
+  sync with automated downloading, replacing #1047
+- [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 8) Audiobookshelf library check,
+  and the sync fails closed when a library cannot be read, stacked on #1516
+
+The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
 The Audiobookshelf provider is the clearest example: it rides the same provider interface
 as the Calibre one, but it is a new service integration rather than something already in
