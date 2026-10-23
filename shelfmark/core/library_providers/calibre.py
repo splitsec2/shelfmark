@@ -29,8 +29,12 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
-# "(Alex Cross Series #11)", "[Illustrated Edition]" and friends.
-_PARENTHETICAL = re.compile(r"[(\[][^)\]]*[)\]]")
+# "(Alex Cross Series #11)", "(Book 2)": a bracketed segment with a number in it.
+_NUMBERED_PARENTHETICAL = re.compile(r"[(\[][^)\]]*\d[^)\]]*[)\]]")
+# "Label NN: Title", a series label and number in front of the work's own title. The
+# label often abbreviates the series ("HHG 5: Mostly Harmless" for The Hitchhiker's
+# Guide to the Galaxy), so its words are in neither the series nor the author name.
+_SERIES_LABEL = re.compile(r"^\s*(?P<label>[^:]{1,40}?)\s+\d+(?:\.\d+)?\s*:\s+\S")
 
 _DEFAULT_DB_PATH = "/calibre-library/metadata.db"
 _BUSY_TIMEOUT_SECONDS = 5
@@ -45,7 +49,7 @@ _EXTERNAL_ID_TYPES = {
     "olid": "openlibrary",
 }
 
-_BOOKS_SQL = "SELECT id, title FROM books"
+_BOOKS_SQL = "SELECT id, title, series_index FROM books"
 _AUTHORS_SQL = "SELECT l.book, a.name FROM books_authors_link l JOIN authors a ON a.id = l.author"
 _SERIES_SQL = "SELECT l.book, s.name FROM books_series_link l JOIN series s ON s.id = l.series"
 _IDENTIFIERS_SQL = "SELECT book, type, val FROM identifiers"
@@ -85,8 +89,21 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _series_index(value: float | str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
-    titles: dict[int, str] = dict(conn.execute(_BOOKS_SQL).fetchall())
+    titles: dict[int, str] = {}
+    series_indexes: dict[int, float | None] = {}
+    for book_id, title, series_index in conn.execute(_BOOKS_SQL):
+        titles[book_id] = title
+        series_indexes[book_id] = _series_index(series_index)
     series: dict[int, str] = dict(conn.execute(_SERIES_SQL).fetchall())
 
     authors: dict[int, list[str]] = {}
@@ -110,15 +127,25 @@ def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
 
     entries: list[LibraryEntry] = []
     for book_id, title in titles.items():
-        # A trailing parenthetical is series or edition metadata by convention rather
+        # A numbered parenthetical is series or volume metadata by convention rather
         # than part of the work name, and Calibre users often put it there instead of
         # in the series field. It stays in the recall set below and is dropped from the
         # title set, which is what decides whether the shelf holds a different book.
-        title_tok = set(tokens(_PARENTHETICAL.sub(" ", title)))
+        # An unnumbered one describes the edition, so its words stay in the title set:
+        # the matcher ignores printing words there ("Illustrated Edition", "Unabridged")
+        # but reads anything else ("Full Cast Edition", "Dramatized Adaptation") as a
+        # different recording of the work, which is not the one being asked for.
+        title_tok = set(tokens(_NUMBERED_PARENTHETICAL.sub(" ", title)))
         context_tok = set(tokens(series.get(book_id)))
-        for name in authors.get(book_id, ()):
+        # Only for a book with a series: there a leading "Label NN:" is the series
+        # label, not words naming another work. Without one it is left to the matcher.
+        if book_id in series and (label := _SERIES_LABEL.match(title)):
+            context_tok |= set(tokens(label.group("label")))
+        book_authors = authors.get(book_id, [])
+        for name in book_authors:
             context_tok |= set(tokens(name))
-        tok = title_tok | context_tok
+        tok = set(tokens(title)) | context_tok
+        series_name = series.get(book_id)
         entries.append(
             LibraryEntry(
                 frozenset(tok),
@@ -127,6 +154,13 @@ def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
                 frozenset(external_ids.get(book_id, ())),
                 frozenset(title_tok),
                 frozenset(context_tok),
+                item_id=str(book_id),
+                title=title,
+                author=book_authors[0] if book_authors else None,
+                series_name=series_name,
+                # Calibre stores a position for every book (1.0 by default); it only
+                # means something for a book that is in a series.
+                series_index=series_indexes.get(book_id) if series_name else None,
             )
         )
     return entries

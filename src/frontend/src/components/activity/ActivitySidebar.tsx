@@ -3,11 +3,20 @@ import { useCallback, useMemo, useRef, useState, type WheelEvent } from 'react';
 import { useTabIndicator } from '../../hooks/ui/useTabIndicator';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { useRejectedRequests } from '../../hooks/useRejectedRequests';
 import type { RequestRecord, StatusData } from '../../types';
 import { Dropdown } from '../Dropdown';
 import { ActivityCard } from './ActivityCard';
 import type { DownloadStatusKey } from './activityMappers';
 import { downloadToActivityItem, linkedDownloadIdForRequest } from './activityMappers';
+import {
+  getActivityCategory,
+  getCategoryHint,
+  getCategoryLabel,
+  getVisibleCategoryOrder,
+  type ActivityCategoryKey,
+  type ActivityTabKey,
+} from './activityCategories';
 import type { ActivityItem } from './activityTypes';
 import { getClearCompletedTargets } from './clearCompleted';
 
@@ -46,6 +55,8 @@ interface ActivitySidebarProps {
   onRequestDismiss?: (requestId: number) => void;
   onPinnedOpenChange?: (pinnedOpen: boolean) => void;
   pinnedTopOffset?: number;
+  // Admin only: opens the series-gap report.
+  onOpenSeriesGaps?: () => void;
 }
 
 export interface ActivityDismissTarget {
@@ -65,88 +76,7 @@ const DOWNLOAD_STATUS_KEYS: DownloadStatusKey[] = [
   'cancelled',
 ];
 
-type ActivityCategoryKey = 'needs_review' | 'in_progress' | 'complete' | 'failed';
-
-type ActivityTabKey = 'all' | 'downloads' | 'requests' | 'history';
 const ALL_USERS_FILTER = '__all_users__';
-
-const getCategoryLabel = (key: ActivityCategoryKey, isAdmin: boolean): string => {
-  if (key === 'needs_review') {
-    return isAdmin ? 'Needs Review' : 'Waiting';
-  }
-  if (key === 'in_progress') {
-    return 'In Progress';
-  }
-  if (key === 'complete') {
-    return 'Complete';
-  }
-  return 'Failed';
-};
-
-const getVisibleCategoryOrder = (tab: ActivityTabKey): ActivityCategoryKey[] => {
-  if (tab === 'downloads') {
-    return ['in_progress', 'complete', 'failed'];
-  }
-  if (tab === 'requests') {
-    return ['needs_review', 'in_progress', 'complete', 'failed'];
-  }
-  if (tab === 'history') {
-    return [];
-  }
-  return ['needs_review', 'in_progress', 'complete', 'failed'];
-};
-
-const getActivityCategory = (item: ActivityItem): ActivityCategoryKey => {
-  if (item.kind === 'download') {
-    if (
-      item.visualStatus === 'queued' ||
-      item.visualStatus === 'resolving' ||
-      item.visualStatus === 'locating' ||
-      item.visualStatus === 'downloading'
-    ) {
-      return 'in_progress';
-    }
-    if (item.visualStatus === 'complete') {
-      return 'complete';
-    }
-    return 'failed';
-  }
-
-  const requestStatus = item.requestRecord?.status;
-  if (requestStatus === 'pending' || item.visualStatus === 'pending') {
-    return 'needs_review';
-  }
-
-  if (requestStatus === 'rejected' || requestStatus === 'cancelled') {
-    return 'failed';
-  }
-
-  const deliveryState = item.requestRecord?.delivery_state;
-  if (requestStatus === 'fulfilled' || item.visualStatus === 'fulfilled') {
-    if (
-      deliveryState === 'queued' ||
-      deliveryState === 'resolving' ||
-      deliveryState === 'locating' ||
-      deliveryState === 'downloading'
-    ) {
-      return 'in_progress';
-    }
-    if (deliveryState === 'error' || deliveryState === 'cancelled') {
-      return 'failed';
-    }
-    // Legacy fulfilled requests often have unknown/none delivery state because the
-    // pre-refactor queue state was ephemeral. Treat as completed approval, not in-progress.
-    return 'complete';
-  }
-
-  if (deliveryState === 'complete') {
-    return 'complete';
-  }
-  if (deliveryState === 'error' || deliveryState === 'cancelled') {
-    return 'failed';
-  }
-  return 'in_progress';
-};
 
 const mergeRequestWithDownload = (
   requestItem: ActivityItem,
@@ -239,6 +169,7 @@ export const ActivitySidebar = ({
   onRequestDismiss,
   onPinnedOpenChange,
   pinnedTopOffset = 0,
+  onOpenSeriesGaps,
 }: ActivitySidebarProps) => {
   const [isPinned, setIsPinned] = useState<boolean>(() => getInitialPinnedPreference());
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -249,25 +180,44 @@ export const ActivitySidebar = ({
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const dismissedKeySet = useMemo(() => new Set(dismissedItemKeys), [dismissedItemKeys]);
+  const { rejectedItems, rejectedLoading, loadRejected, setRejectedHidden } = useRejectedRequests();
+  const [showHiddenRejected, setShowHiddenRejected] = useState(false);
+  const hiddenRejectedCount = rejectedItems.filter((item) => item.hiddenInRejected).length;
   const handleTabChange = useCallback(
     (nextTab: ActivityTabKey) => {
       if (nextTab === 'downloads') {
         setRejectingRequest(null);
         setReviewingRequestId(null);
       }
+      if (nextTab === 'rejected') {
+        void loadRejected();
+      }
       setActiveTab(nextTab);
       onActiveTabChange?.(nextTab);
     },
-    [onActiveTabChange],
+    [loadRejected, onActiveTabChange],
   );
 
   const isPinnedOpen = isOpen && isDesktop && isPinned;
-  const effectiveActiveTab = !showRequestsTab && activeTab === 'requests' ? 'all' : activeTab;
+  let effectiveActiveTab = activeTab;
+  if (!showRequestsTab && activeTab === 'requests') {
+    effectiveActiveTab = 'all';
+  } else if (!isAdmin && activeTab === 'rejected') {
+    effectiveActiveTab = 'all';
+  }
   if (effectiveActiveTab !== activeTab) {
     setActiveTab(effectiveActiveTab);
   }
 
   useEscapeKey(isOpen && !isPinnedOpen, onClose);
+
+  const handleRejectedReopen = useCallback(
+    async (requestId: number) => {
+      await onRequestReopen?.(requestId);
+      void loadRejected();
+    },
+    [loadRejected, onRequestReopen],
+  );
 
   const downloadItems = useMemo(() => {
     const items: ActivityItem[] = [];
@@ -379,17 +329,6 @@ export const ActivitySidebar = ({
     };
   }, [downloadItems, visibleRequestItems]);
 
-  const hasTerminalDownloadItems = useMemo(
-    () =>
-      mergedDownloadItems.some(
-        (item) =>
-          item.visualStatus === 'complete' ||
-          item.visualStatus === 'error' ||
-          item.visualStatus === 'cancelled',
-      ),
-    [mergedDownloadItems],
-  );
-
   const allItems = useMemo(() => {
     const combined = dedupeById([...mergedDownloadItems, ...mergedRequestItems]);
     return combined.toSorted((a, b) => b.timestamp - a.timestamp);
@@ -412,6 +351,10 @@ export const ActivitySidebar = ({
     });
   } else if (effectiveActiveTab === 'history') {
     baseVisibleItems = historyItems;
+  } else if (effectiveActiveTab === 'rejected') {
+    baseVisibleItems = showHiddenRejected
+      ? rejectedItems
+      : rejectedItems.filter((item) => !item.hiddenInRejected);
   }
   const isHistoryInitialLoad = effectiveActiveTab === 'history' && !historyLoaded;
   let emptyStateMessage = 'No activity';
@@ -422,6 +365,14 @@ export const ActivitySidebar = ({
       historyLoading || isHistoryInitialLoad ? 'Loading history...' : 'No history';
   } else if (effectiveActiveTab === 'downloads') {
     emptyStateMessage = 'No downloads';
+  } else if (effectiveActiveTab === 'rejected') {
+    if (rejectedLoading) {
+      emptyStateMessage = 'Loading rejected requests...';
+    } else if (hiddenRejectedCount > 0 && !showHiddenRejected) {
+      emptyStateMessage = `No rejected requests shown (${hiddenRejectedCount} hidden)`;
+    } else {
+      emptyStateMessage = 'No rejected requests';
+    }
   }
 
   const availableUsers = useMemo(() => {
@@ -497,7 +448,7 @@ export const ActivitySidebar = ({
   );
 
   const groupedVisibleItems = useMemo(() => {
-    if (effectiveActiveTab === 'history') {
+    if (effectiveActiveTab === 'history' || effectiveActiveTab === 'rejected') {
       return [];
     }
 
@@ -519,6 +470,7 @@ export const ActivitySidebar = ({
       .map((key) => ({
         key,
         label: getCategoryLabel(key, isAdmin),
+        hint: getCategoryHint(key, isAdmin),
         items: (grouped.get(key) ?? []).toSorted((left, right) => right.timestamp - left.timestamp),
       }))
       .filter((group) => group.items.length > 0);
@@ -551,7 +503,9 @@ export const ActivitySidebar = ({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">
-              {effectiveActiveTab === 'history' ? 'History' : 'Activity'}
+              {effectiveActiveTab === 'history' && 'History'}
+              {effectiveActiveTab === 'rejected' && 'Rejected'}
+              {effectiveActiveTab !== 'history' && effectiveActiveTab !== 'rejected' && 'Activity'}
             </h2>
             <button
               type="button"
@@ -584,6 +538,30 @@ export const ActivitySidebar = ({
           </div>
 
           <div className="flex items-center gap-1">
+            {isAdmin && onOpenSeriesGaps && (
+              <button
+                type="button"
+                onClick={onOpenSeriesGaps}
+                className="hover-action inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors"
+                title="Series gaps"
+                aria-label="Open the series gaps report"
+              >
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  strokeWidth="1.75"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"
+                  />
+                </svg>
+              </button>
+            )}
             {hasUserFilter && (
               <Dropdown
                 align="right"
@@ -667,6 +645,36 @@ export const ActivitySidebar = ({
                 )}
               </Dropdown>
             )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() =>
+                  handleTabChange(effectiveActiveTab === 'rejected' ? 'all' : 'rejected')
+                }
+                className={`hover-action relative inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  effectiveActiveTab === 'rejected' ? 'text-sky-600 dark:text-sky-400' : ''
+                }`}
+                title={
+                  effectiveActiveTab === 'rejected' ? 'Back to activity' : 'Open rejected requests'
+                }
+                aria-label={
+                  effectiveActiveTab === 'rejected' ? 'Back to activity' : 'Open rejected requests'
+                }
+                aria-pressed={effectiveActiveTab === 'rejected'}
+              >
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="8.25" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.2 6.2l11.6 11.6" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleTabChange(effectiveActiveTab === 'history' ? 'all' : 'history')}
@@ -714,7 +722,20 @@ export const ActivitySidebar = ({
           </div>
         </div>
 
-        {effectiveActiveTab !== 'history' && (
+        {effectiveActiveTab === 'rejected' && (
+          <div className="mt-2 flex items-center justify-end text-sm">
+            <label className="inline-flex cursor-pointer items-center gap-2 opacity-80">
+              <input
+                type="checkbox"
+                checked={showHiddenRejected}
+                onChange={(event) => setShowHiddenRejected(event.target.checked)}
+              />
+              Show hidden ({hiddenRejectedCount})
+            </label>
+          </div>
+        )}
+
+        {effectiveActiveTab !== 'history' && effectiveActiveTab !== 'rejected' && (
           <div className="-mx-4 mt-2 border-b border-(--border-muted) px-4">
             <div className="relative flex gap-1">
               {/* Sliding indicator */}
@@ -797,6 +818,22 @@ export const ActivitySidebar = ({
             return <p className="mt-8 text-center text-sm opacity-70">{emptyStateMessage}</p>;
           }
 
+          if (effectiveActiveTab === 'rejected') {
+            return (
+              <div className="divide-y divide-[color-mix(in_srgb,var(--border-muted)_60%,transparent)]">
+                {visibleItems.map((item) => (
+                  <ActivityCard
+                    key={item.id}
+                    item={item}
+                    isAdmin={isAdmin}
+                    onRequestReopen={onRequestReopen ? handleRejectedReopen : undefined}
+                    onRequestSetHidden={setRejectedHidden}
+                  />
+                ))}
+              </div>
+            );
+          }
+
           if (effectiveActiveTab === 'history') {
             return (
               <div className="divide-y divide-[color-mix(in_srgb,var(--border-muted)_60%,transparent)]">
@@ -854,6 +891,9 @@ export const ActivitySidebar = ({
                     {group.items.length}
                   </span>
                 </button>
+              )}
+              {group.hint && !collapsedGroups[group.key] && (
+                <p className="px-0 pb-1.5 text-[11px] leading-snug opacity-60">{group.hint}</p>
               )}
               {!collapsedGroups[group.key] && (
                 <div className="divide-y divide-[color-mix(in_srgb,var(--border-muted)_60%,transparent)]">
@@ -958,8 +998,9 @@ export const ActivitySidebar = ({
         })()}
       </div>
 
-      {(effectiveActiveTab === 'downloads' || effectiveActiveTab === 'all') &&
-        hasTerminalDownloadItems &&
+      {(effectiveActiveTab === 'downloads' ||
+        effectiveActiveTab === 'all' ||
+        effectiveActiveTab === 'requests') &&
         clearCompletedTargets.length > 0 && (
           <div
             className="flex items-center justify-center border-t p-3"

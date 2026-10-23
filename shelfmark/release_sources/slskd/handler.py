@@ -47,6 +47,7 @@ from shelfmark.release_sources.slskd.api import (
     transfer_is_complete,
     transfer_succeeded,
 )
+from shelfmark.release_sources.slskd.chat_autoprove import ChatAutoProver
 from shelfmark.release_sources.slskd.source import (
     SOURCE_NAME,
     build_client_from_config,
@@ -63,6 +64,9 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 POLL_INTERVAL = 2.0
+
+# Shared by every download so concurrent polls still scan private messages once a minute.
+_CHAT_AUTOPROVER = ChatAutoProver()
 COMPLETED_PATH_RETRY_INTERVAL = _DEFAULT_COMPLETED_PATH_RETRY_INTERVAL
 COMPLETED_PATH_MAX_ATTEMPTS = _DEFAULT_COMPLETED_PATH_MAX_ATTEMPTS
 # Polls with the transfer missing from slskd before giving up (~30s at POLL_INTERVAL).
@@ -83,6 +87,32 @@ _USE_ORIGINAL_ENQUEUE = object()  # sentinel: this slskd has no batch endpoint
 _SECONDS_PER_MINUTE = 60
 
 _SLSKD_ERRORS = (requests.exceptions.RequestException, SlskdError, ValueError, TypeError)
+
+# slskd gives up on a peer that does not answer a queue request after 5 seconds and returns a
+# 500. One more try, a few seconds later, costs little and often works.
+_ENQUEUE_ATTEMPTS = 2
+_ENQUEUE_RETRY_WAIT_SECONDS = 5.0
+_HTTP_SERVER_ERROR = 500
+_ERROR_BODY_CHARS = 160
+
+
+def _is_server_error(exc: BaseException) -> bool:
+    response = getattr(exc, "response", None)
+    return (
+        isinstance(exc, requests.exceptions.HTTPError)
+        and response is not None
+        and response.status_code >= _HTTP_SERVER_ERROR
+    )
+
+
+def _error_text(exc: BaseException) -> str:
+    """The error, with what slskd said when it answered with a body."""
+    response = getattr(exc, "response", None)
+    body = ""
+    if isinstance(exc, requests.exceptions.HTTPError) and response is not None:
+        with suppress(Exception):
+            body = " ".join(str(response.text or "").split())[:_ERROR_BODY_CHARS]
+    return f"{exc} ({body})" if body else str(exc)
 
 
 @dataclass(frozen=True)
@@ -365,6 +395,23 @@ def _discard_folder(folder: Path) -> None:
         logger.debug("Could not remove slskd folder %s: %s", folder, e)
 
 
+# Public names for the leftovers sweep, which reads the same settings and folder rules.
+def isolation_enabled() -> bool:
+    return _bool_setting("SLSKD_ISOLATE_DOWNLOADS", True)
+
+
+def destination_prefix() -> str:
+    return _clean_prefix(config.get("SLSKD_DESTINATION_PREFIX", DEFAULT_DESTINATION_PREFIX))
+
+
+def bool_setting(key: str, default: bool) -> bool:
+    return _bool_setting(key, default)
+
+
+def folder_complete(folder: Path, expected_sizes: list[int]) -> bool:
+    return _folder_complete(folder, expected_sizes)
+
+
 def _completed_remote_files(events: list[dict[str, Any]]) -> set[str]:
     """Remote filenames slskd's stored events say finished downloading."""
     done: set[str] = set()
@@ -442,6 +489,11 @@ class SlskdHandler(DownloadHandler):
 
     def _get_client(self) -> SlskdClient | None:
         return build_client_from_config()
+
+    def _answer_chat_challenges(self, client: SlskdClient) -> None:
+        """Reply to anti-leech bots that block downloads until they get a chat message."""
+        if _bool_setting("SLSKD_CHAT_AUTOPROVE", True):
+            _CHAT_AUTOPROVER.maybe_scan(lambda: client, time.monotonic)
 
     # ── download ──────────────────────────────────────────────────────────────
 
@@ -563,6 +615,7 @@ class SlskdHandler(DownloadHandler):
 
         try:
             while not cancel_flag.is_set():
+                self._answer_chat_challenges(client)
                 try:
                     transfers = client.list_downloads(spec.username)
                 except _SLSKD_ERRORS as e:
@@ -788,6 +841,7 @@ class SlskdHandler(DownloadHandler):
         # A restart or retry finds the files already there: nothing to download again.
         if _folder_complete(folder, expected):
             logger.info("slskd: %s already holds the files for %s", folder, task.task_id)
+            task.reattached = True
             progress_callback(100.0)
             return self._finish_isolated(task, client, spec.username, [], folder)
         # An earlier attempt's files (a restart, or a cleanup that failed). They are finished,
@@ -799,13 +853,33 @@ class SlskdHandler(DownloadHandler):
             _remove_files(leftovers)
 
         status_callback("resolving", "Sending to slskd")
-        try:
-            batch = client.enqueue_batch(spec.username, spec.files, destination)
-        except SlskdBatchUnsupportedError:
-            return _USE_ORIGINAL_ENQUEUE
-        except _SLSKD_ERRORS as e:
-            logger.exception("Failed to enqueue slskd batch")
-            status_callback("error", f"Failed to add to slskd: {e}")
+        batch: dict[str, Any] | None = None
+        for attempt in range(_ENQUEUE_ATTEMPTS):
+            try:
+                batch = client.enqueue_batch(spec.username, spec.files, destination)
+                break
+            except SlskdBatchUnsupportedError:
+                return _USE_ORIGINAL_ENQUEUE
+            except _SLSKD_ERRORS as e:
+                if attempt + 1 < _ENQUEUE_ATTEMPTS and _is_server_error(e):
+                    # slskd answers 500 when the peer does not reply to the queue request
+                    # inside its own 5 second wait. A peer that missed it once often answers
+                    # a moment later.
+                    logger.warning(
+                        "slskd could not queue %s from %s (%s), trying again",
+                        task.task_id,
+                        spec.username,
+                        _error_text(e),
+                    )
+                    status_callback("resolving", "The peer did not answer, trying again")
+                    if cancel_flag.wait(timeout=_ENQUEUE_RETRY_WAIT_SECONDS):
+                        status_callback("cancelled", "Cancelled")
+                        return None
+                    continue
+                logger.error("Failed to enqueue slskd batch: %s", _error_text(e), exc_info=True)
+                status_callback("error", f"Failed to add to slskd: {_error_text(e)}")
+                return None
+        if batch is None:
             return None
 
         ids = {
@@ -816,6 +890,8 @@ class SlskdHandler(DownloadHandler):
         failures = batch["failures"]
         if failures:
             ids, unresolved = self._rejoin_refused(client, spec, ids, failures)
+            if len(unresolved) < len(failures):
+                task.reattached = True  # slskd already had some of the files; they were joined
             if unresolved:
                 first = unresolved[0].get("message") or "unknown reason"
                 status_callback("error", f"slskd refused {len(unresolved)} file(s): {first}")
@@ -895,6 +971,7 @@ class SlskdHandler(DownloadHandler):
 
         try:
             while not cancel_flag.is_set():
+                self._answer_chat_challenges(client)
                 now = self._clock()
                 records: dict[str, dict[str, Any] | None] = {}
                 try:

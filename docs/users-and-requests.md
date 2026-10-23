@@ -67,6 +67,10 @@ Admins can override the default ebook/audiobook modes and request rules for indi
 
 ---
 
+## Clearing the activity list
+
+**Clear Completed** in the activity list clears finished downloads and their requests, and (in this fork) also finished requests that never had a download, such as one closed because the book was already in the library. Pending and rejected requests are left alone.
+
 ## Requests
 
 The request system controls whether users can download directly or need admin approval first.
@@ -112,3 +116,13 @@ Admins can override the default ebook/audiobook modes and request rules for indi
 5. If delivery fails, an admin can reopen the request to try a different release
 6. Users can cancel their own pending requests
 7. An admin can **reopen** a rejected request, from the Requests tab or from History. It goes back to pending with what the user originally asked for, and shows in the activity list again even if the user had dismissed it.
+
+An admin sees who declined a request and when on its card, with the admin note if one was given.
+
+### Rejected view (this fork)
+
+A button next to History opens **Rejected**: every rejected request, including ones cleared from the activity list, each with **Reopen**. A card can be hidden from this view, and **Show hidden (N)** in its header brings hidden ones back, so a request is never out of reach. Hiding here is separate from clearing a card in Activity.
+
+Every card shows the format as a coloured pill: **Audiobook** or **Ebook** on a request, or the file format (EPUB, M4B, MP3) once a release is chosen or downloaded. Audio is violet and ebooks are orange.
+
+Admin actions taken by scripts or automation carry an admin note starting `[auto]`, for example `[auto] Already in the library.`, so they can be told apart from decisions a person made.

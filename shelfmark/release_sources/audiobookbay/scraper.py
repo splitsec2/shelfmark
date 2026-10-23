@@ -1,8 +1,10 @@
 """Web scraping functions for AudiobookBay."""
 
+import base64
 import re
 import time
 from threading import Lock
+from typing import TYPE_CHECKING
 from urllib.parse import quote, quote_plus
 
 import requests
@@ -13,6 +15,9 @@ from shelfmark.core.logger import setup_logger
 from shelfmark.download import http as downloader
 from shelfmark.download.postprocess.packs import PackFile
 from shelfmark.release_sources.audiobookbay.utils import normalize_search_punctuation
+
+if TYPE_CHECKING:
+    from bs4.element import Tag
 
 logger = setup_logger(__name__)
 
@@ -117,6 +122,26 @@ def _encode_search_query(query: str, *, exact_phrase: bool) -> str:
     # '&' would otherwise start a new query parameter, '%' would open an invalid
     # escape, and a literal '+' would arrive as a space.
     return quote_plus(search_query)
+
+
+def _decode_post(post: Tag) -> Tag | BeautifulSoup:
+    """Decode ABB's base64-encoded post markup when present.
+
+    ABB serves post content base64-encoded inside a hidden ``.post`` div and
+    decodes it client-side with JavaScript; the decoded payload is the classic
+    ``.postTitle``/``.postInfo``/``.postContent`` markup. Plain-markup posts
+    (older mirrors) are returned unchanged, so never assume base64.
+    """
+    raw = "".join(post.get_text(strip=True).split())
+    if not raw or len(raw) < 32:
+        return post
+    try:
+        html = base64.b64decode(raw, validate=True).decode("utf-8", "replace")
+    except ValueError:
+        return post
+    if "postTitle" not in html:
+        return post
+    return BeautifulSoup(html, "html.parser")
 
 
 def _normalize_result_url(url: str, hostname: str) -> str:
@@ -249,12 +274,13 @@ def search_audiobookbay(
             # Parse HTML
             soup = BeautifulSoup(page_html, "html.parser")
 
-            # Extract book entries
-            posts = soup.select(".post")
+            # Extract book entries (decoding ABB's base64-wrapped markup when present)
+            posts = [_decode_post(p) for p in soup.select(".post")]
             if not posts:
                 # No more results
                 break
 
+            parsed_before = len(results)
             for post in posts:
                 try:
                     # Extract title
@@ -350,6 +376,16 @@ def search_audiobookbay(
                 except (TypeError, ValueError, AttributeError, IndexError, KeyError) as e:
                     logger.debug("Skipping post due to error: %s", e)
                     continue
+
+            # A page with .post elements that all fail to parse usually means ABB
+            # changed its markup; without this the source silently returns [].
+            if len(results) == parsed_before:
+                logger.warning(
+                    "ABB page %s: found %d .post elements but parsed 0 results, "
+                    "site markup may have changed",
+                    page,
+                    len(posts),
+                )
 
             # Rate limiting delay between pages
             if page < max_pages and rate_limit_delay > 0:
@@ -452,6 +488,70 @@ def extract_file_list(detail_html: str) -> list[PackFile] | None:
         if parsed is not None:
             rows.append(parsed)
     return None
+
+
+# One credit in a line of them: "Anne Rice (Author)", "Dylan Baker (Reader)".
+_CREDIT = re.compile(r"^(?P<name>[^()]+?)\s*\((?P<role>[A-Za-z ]+)\)$")
+_LEADING_BY = re.compile(r"^\s*by\s+", re.IGNORECASE)
+_AUTHOR_ROLES = frozenset({"author", "writer"})
+
+
+def _credited_authors(text: str) -> list[str]:
+    """Authors from a paragraph that is nothing but credits, else an empty list.
+
+    "by Anne Rice (Author)" and "James Patterson (Author), Richard DiLallo (Author),
+    Dylan Baker (Reader)" qualify. A paragraph with anything else in it is description,
+    and a name it mentions says nothing about who wrote the book.
+    """
+    parts = [part.strip() for part in _LEADING_BY.sub("", text).split(",")]
+    matches = [_CREDIT.match(part) for part in parts]
+    if not parts or not all(matches):
+        return []
+    return [
+        credit.group("name").strip()
+        for credit in matches
+        if credit and credit.group("role").strip().lower() in _AUTHOR_ROLES
+    ]
+
+
+def extract_authors(detail_html: str) -> list[str]:
+    """The book's authors as a detail page credits them; empty when it does not say.
+
+    Newer posts mark the authors up ("Written by" and ``span.author``); older ones, whose
+    listing title carries no " - Author", have a line of credits instead. Only names
+    credited as the author count: a narrator is not one, and a name in the description
+    is not read at all.
+    """
+    soup = BeautifulSoup(detail_html, "html.parser")
+    content = soup.select_one(".postContent") or soup
+    marked = [span.get_text(" ", strip=True) for span in content.select("span.author")]
+    if any(marked):
+        return [name for name in marked if name]
+    for paragraph in content.find_all("p"):
+        authors = _credited_authors(paragraph.get_text(" ", strip=True))
+        if authors:
+            return authors
+    return []
+
+
+# What a visitor writes under a post nobody is seeding: "0 seeders", "no seeds", "please seed",
+# "unseeded", "dead". Anything shorter or vaguer than these is ignored.
+_SEED_COMPLAINT_PATTERN = re.compile(
+    r"\b(?:0|no|zero)\s+seed(?:s|ers?)?\b"
+    r"|\bunseeded\b|\bnot\s+seeding\b|\bno\s+one\s+(?:is\s+)?seeding\b"
+    r"|\bplease\s+(?:re-?)?seed\b|\bseeders?\s+needed\b|\bneeds?\s+seed|\bdead\b",
+    re.IGNORECASE,
+)
+
+
+def extract_seed_complaints(detail_html: str) -> int:
+    """How many comments on a post say nobody is seeding it. A hint, not a seed count."""
+    soup = BeautifulSoup(detail_html, "html.parser")
+    return sum(
+        1
+        for body in soup.select('[itemprop="reviewBody"]')
+        if _SEED_COMPLAINT_PATTERN.search(body.get_text(" ", strip=True))
+    )
 
 
 def extract_magnet_link(details_url: str, hostname: str = "audiobookbay.lu") -> str | None:

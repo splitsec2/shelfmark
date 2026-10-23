@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Any
 from shelfmark.core.library_providers import all_providers
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.text_match import (
-    COLLECTION_MARKERS,
     author_surname,
+    bundle_markers,
     extra_work_tokens,
     isbn_variants,
     title_tokens_match,
@@ -68,14 +68,31 @@ def _store(provider_name: str, entries: list[LibraryEntry], fingerprint: object 
         slot.failed_at = None
 
 
-def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
-    """Cached entries for one provider, re-indexed past the TTL or when the library changed."""
+class LibraryUnavailableError(RuntimeError):
+    """An enabled library could not be read and there is no earlier index to fall back on."""
+
+
+def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[LibraryEntry]:
+    """Cached entries for one provider, re-indexed past the TTL or when the library changed.
+
+    A library that cannot be read answers from its stale cache when there is one. With
+    nothing cached the default is to fail open (no entries, so nothing counts as owned),
+    which suits badges. ``strict`` raises instead, for callers that act on the answer.
+    """
     slot = _slot(provider.name)
     with _lock:
-        if slot.failed_at is not None and time.monotonic() - slot.failed_at < (
-            _FAILURE_BACKOFF_SECONDS
-        ):
-            return slot.entries or []
+        backing_off = slot.failed_at is not None and (
+            time.monotonic() - slot.failed_at < _FAILURE_BACKOFF_SECONDS
+        )
+        stale = slot.entries
+    if backing_off:
+        # Same answer the failure gave: the stale index, or (strict) a refusal to guess.
+        if stale is not None:
+            return stale
+        if strict:
+            msg = f"{provider.describe()} is unavailable (retrying after a short back-off)"
+            raise LibraryUnavailableError(msg)
+        return []
     try:
         fingerprint = provider.fingerprint()
         with _lock:
@@ -85,11 +102,29 @@ def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
         if cached is not None and fresh and unchanged:
             return cached
         entries = provider.fetch_entries()
-    except Exception as exc:  # noqa: BLE001 - any failure must fail open
-        logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
+        with _lock:
+            had_entries = bool(slot.entries)
+        if had_entries and not entries:
+            # A library that held books a moment ago and now lists none is far more likely a
+            # changed answer from the server than an emptied shelf. Indexing it would make
+            # every owned book look missing, so it is treated like any other failed read
+            # (the earlier index keeps answering, strict callers hold). A library that was
+            # really emptied clears on the next restart.
+            msg = "it listed no items although it held some at the last index"
+            raise ValueError(msg)  # noqa: TRY301 - handled by the failure path below
+    except Exception as exc:
         with _lock:
             slot.failed_at = time.monotonic()
-            return slot.entries or []  # Use the stale cache if we have one.
+            stale = slot.entries
+        if stale is not None:
+            logger.warning(
+                "library check: %s unavailable (%s); using stale index", provider.describe(), exc
+            )
+            return stale
+        if strict:
+            raise LibraryUnavailableError(f"{provider.describe()} is unavailable: {exc}") from exc
+        logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
+        return []
 
     _store(provider.name, entries, fingerprint)
     logger.info("library check: indexed %d %s item(s)", len(entries), provider.display_name)
@@ -109,41 +144,152 @@ def any_provider_enabled() -> bool:
     return any(provider.is_enabled() for provider in all_providers())
 
 
-def match_entries(book: BookMetadata, entries: list[LibraryEntry]) -> str | None:
-    """How ``book`` is held: ``"owned"``, ``"collection"``, or None when it is not.
+def entries_for_provider(provider: LibraryProvider, *, strict: bool = False) -> list[LibraryEntry]:
+    """The cached index of one library; see ``_entries_for`` for the strict/fail-open rule."""
+    return _entries_for(provider, strict=strict)
 
-    ``"collection"`` means a shelf title that bundles several works matched, e.g. an
-    omnibus. The reader has the book, but saying so plainly would misdescribe what is
-    on the shelf.
+
+def enabled_content_types() -> list[str]:
+    """The content types at least one enabled library holds, in a fixed order."""
+    return [
+        content_type for content_type in ("ebook", "audiobook") if _enabled_providers(content_type)
+    ]
+
+
+def entries_for_content_type(content_type: str, *, strict: bool = False) -> list[LibraryEntry]:
+    """Every enabled library's entries for ``content_type``, concatenated.
+
+    Same caching and fail-open rules as ``is_in_library``; ``strict`` raises
+    LibraryUnavailableError instead of answering from nothing.
     """
-    if not entries:
+    entries: list[LibraryEntry] = []
+    for provider in _enabled_providers(content_type):
+        entries.extend(_entries_for(provider, strict=strict))
+    return entries
+
+
+@dataclass(frozen=True)
+class MatchQuery:
+    """What the matcher needs to know about the book it is looking for.
+
+    Built from a :class:`BookMetadata` (a request or search result) or from another
+    library's :class:`LibraryEntry`, so both go through the same rules.
+    """
+
+    title: str
+    surname: str | None
+    isbns: frozenset[str] = frozenset()
+    asins: frozenset[str] = frozenset()
+    external_ids: frozenset[tuple[str, str]] = frozenset()
+
+
+def _book_query(book: BookMetadata) -> MatchQuery:
+    external_ids = (
+        frozenset({(book.provider, str(book.provider_id))}) if book.provider_id else frozenset()
+    )
+    return MatchQuery(
+        title=book.search_title or book.title,
+        surname=author_surname(book.search_author or (book.authors[0] if book.authors else "")),
+        isbns=isbn_variants(book.isbn_13) | isbn_variants(book.isbn_10),
+        external_ids=external_ids,
+    )
+
+
+def entry_query(entry: LibraryEntry) -> MatchQuery:
+    """The query one library's entry makes against another library.
+
+    The title is rebuilt from the entry's title tokens, which already have the series
+    label and numbered parenthetical stripped, so a shelf renamed "Alex Cross 02: Kiss
+    the Girls" asks the other library for "Kiss the Girls". The matcher's text rules
+    only ever look at token sets, so word order is irrelevant.
+    """
+    return MatchQuery(
+        title=" ".join(sorted(entry.title_tokens)),
+        surname=author_surname(entry.author),
+        isbns=entry.isbns,
+        asins=entry.asins,
+        external_ids=entry.external_ids,
+    )
+
+
+def _identity_match(query: MatchQuery, entry: LibraryEntry) -> bool:
+    """The same metadata-provider id, an ISBN in either form, or an ASIN."""
+    return bool(
+        query.external_ids & entry.external_ids
+        or query.isbns & entry.isbns
+        or query.asins & entry.asins
+    )
+
+
+def _text_match(query: MatchQuery, entry: LibraryEntry) -> str | None:
+    """Fuzzy title-token overlap plus the author surname: "owned", "collection" or None."""
+    title = query.title
+    if not title_tokens_match(title, set(entry.tokens)):
         return None
+    if query.surname is not None and query.surname not in entry.tokens:
+        return None
+    # A shorter search title is a subset of every longer shelf title sharing its
+    # words, so "Dune" matched "Dune Messiah". Words the shelf adds that name
+    # another work disqualify it; packaging words do not.
+    if extra_work_tokens(set(entry.title_tokens), title, set(entry.context_tokens)):
+        return None
+    if bundle_markers(entry.title_tokens, title):
+        return "collection"
+    return "owned"
 
-    external_id = (book.provider, str(book.provider_id)) if book.provider_id else None
-    book_isbns = isbn_variants(book.isbn_13) | isbn_variants(book.isbn_10)
-    for entry in entries:
-        if external_id in entry.external_ids or entry.isbns & book_isbns:
-            return "owned"
 
-    title = book.search_title or book.title
-    surname = author_surname(book.search_author or (book.authors[0] if book.authors else ""))
-    collection: str | None = None
+def find_match(query: MatchQuery, entries: list[LibraryEntry]) -> tuple[str, LibraryEntry] | None:
+    """The entry holding ``query`` and how: ``("owned", entry)``, ``("collection", entry)``.
+
+    Identifiers decide first, then the text rules. ``"collection"`` means a shelf title
+    that bundles several works matched, e.g. an omnibus. The reader has the book, but
+    saying so plainly would misdescribe what is on the shelf.
+    """
     for entry in entries:
-        if not title_tokens_match(title, set(entry.tokens)):
-            continue
-        if surname is not None and surname not in entry.tokens:
-            continue
-        # A shorter search title is a subset of every longer shelf title sharing its
-        # words, so "Dune" matched "Dune Messiah". Words the shelf adds that name
-        # another work disqualify it; packaging words do not.
-        if extra_work_tokens(set(entry.title_tokens), title, set(entry.context_tokens)):
-            continue
-        if entry.title_tokens & COLLECTION_MARKERS:
-            collection = "collection"
-            continue
-        return "owned"
+        if _identity_match(query, entry):
+            return "owned", entry
+
+    collection: tuple[str, LibraryEntry] | None = None
+    for entry in entries:
+        kind = _text_match(query, entry)
+        if kind == "owned":
+            return "owned", entry
+        if kind == "collection":
+            collection = collection or ("collection", entry)
 
     return collection
+
+
+def match_entries(book: BookMetadata, entries: list[LibraryEntry]) -> str | None:
+    """How ``book`` is held: ``"owned"``, ``"collection"``, or None when it is not."""
+    found = find_match(_book_query(book), entries)
+    return found[0] if found else None
+
+
+def matching_entries(entry: LibraryEntry, entries: list[LibraryEntry]) -> list[LibraryEntry]:
+    """Every entry in ``entries`` that is the same work as ``entry``, held on its own.
+
+    Two libraries' copies of one work, which is what a cross-format marker names, so
+    all of them count: two editions of an ebook both have the one audiobook. A
+    collection is not a copy: the omnibus contains the work, but marking it as "the
+    ebook is in the library" would overstate what the other side has.
+
+    Both authors are known here, so the text rule checks the surname both ways. The
+    one-way check reads any token as the surname, which lets Ethan Cross's "Cross"
+    claim James Patterson's "Cross" through the title word; the other author's surname
+    missing from this entry's tokens rules that out.
+    """
+    query = entry_query(entry)
+    found = [other for other in entries if _identity_match(query, other)]
+    for other in entries:
+        if other in found:
+            continue
+        surname = author_surname(other.author)
+        if surname is not None and surname not in entry.tokens:
+            continue
+        if _text_match(query, other) == "owned":
+            found.append(other)
+    return found
 
 
 def book_matches_entries(book: BookMetadata, entries: list[LibraryEntry]) -> bool:
@@ -151,13 +297,22 @@ def book_matches_entries(book: BookMetadata, entries: list[LibraryEntry]) -> boo
     return match_entries(book, entries) is not None
 
 
-def is_in_library(book: BookMetadata, content_type: str | None = None) -> bool:
-    """True if an enabled library holding ``content_type`` already has ``book`` (fail-open).
+def require_ready() -> None:
+    """Raise LibraryUnavailableError unless every enabled library can be read (or is cached)."""
+    for provider in _enabled_providers(None):
+        _entries_for(provider, strict=True)
 
-    ``content_type`` None consults every enabled provider.
+
+def is_in_library(
+    book: BookMetadata, content_type: str | None = None, *, strict: bool = False
+) -> bool:
+    """True if an enabled library holding ``content_type`` already has ``book``.
+
+    ``content_type`` None consults every enabled provider. A library that cannot be read
+    counts as not holding the book, unless ``strict``, which raises LibraryUnavailableError.
     """
     return any(
-        book_matches_entries(book, _entries_for(provider))
+        book_matches_entries(book, _entries_for(provider, strict=strict))
         for provider in _enabled_providers(content_type)
     )
 

@@ -224,6 +224,7 @@ try:
         PasswordAttemptLimiter,
         register_self_user_routes,
     )
+    from shelfmark.core.series_gap_routes import register_series_gap_routes
 
     register_oidc_routes(app, user_db)
     register_admin_routes(app, user_db)
@@ -237,6 +238,7 @@ try:
             clear=lambda username: clear_failed_logins(username),  # noqa: PLW0108
         ),
     )
+    register_series_gap_routes(app, user_db)
 except (sqlite3.OperationalError, OSError) as e:
     logger.warning(
         "User database initialization failed: %s. Multi-user authentication features will be disabled. Ensure CONFIG_DIR (%s) exists and is writable.",
@@ -290,6 +292,15 @@ if user_db is not None and download_history_service is not None:
 
 # Start download coordinator
 backend.start()
+
+# Start the Hardcover wishlist sync + auto-download scheduler (in-process daemon).
+if user_db is not None:
+    try:
+        from shelfmark.core import hardcover_scheduler
+
+        hardcover_scheduler.start(user_db, backend.queue_release, _user_db_path)
+    except (ImportError, RuntimeError, OSError) as exc:
+        logger.warning("Failed to start Hardcover scheduler: %s", exc)
 
 # Pre-solve the direct-download source's protection challenge in the background so the
 # first user search does not pay for a cold Chrome bypass. Never blocks startup.
@@ -1485,7 +1496,7 @@ def api_config() -> Response | tuple[Response, int]:
 @app.route("/api/stats", methods=["GET"])
 def api_stats() -> Response | tuple[Response, int]:
     """Counters for dashboards. Reachable with the read-only API key, an admin key or an admin session."""
-    from shelfmark.core import stats
+    from shelfmark.core import hardcover_scheduler, stats
 
     scope = g.get("api_key_scope")
     if get_auth_mode() != "none" and scope is None:
@@ -1501,6 +1512,7 @@ def api_stats() -> Response | tuple[Response, int]:
     except sqlite3.Error:
         logger.exception("stats: could not read the database")
         return jsonify({"error": "Internal Server Error"}), 500
+    payload["scheduler"] = hardcover_scheduler.status()
     return jsonify(payload)
 
 
@@ -1514,7 +1526,18 @@ def api_health() -> Response | tuple[Response, int]:
         flask.Response: JSON with status "ok" and optional degraded features.
 
     """
-    response: dict[str, object] = {"status": "ok"}
+    from shelfmark.core import hardcover_scheduler
+
+    scheduler = hardcover_scheduler.status()
+    response: dict[str, object] = {
+        "status": "ok",
+        # What a monitor keys on: the container can be up while the sync cycle is not.
+        "scheduler": {
+            "enabled": scheduler["enabled"],
+            "healthy": scheduler["healthy"],
+            "seconds_since_last_cycle": scheduler["seconds_since_last_cycle"],
+        },
+    }
 
     # Report degraded features
     if not backend.WEBSOCKET_AVAILABLE:
@@ -2952,9 +2975,10 @@ def api_metadata_search() -> Response | tuple[Response, int]:
 
         # Extract custom search field values from query params
         fields: dict[str, Any] = {}
-        may_use_account = _session_may_use_provider_account()
+        account_fields = getattr(provider, "account_search_fields", frozenset())
+        account_provider = _resolve_account_provider(provider.name) if account_fields else None
         for search_field in provider.search_fields:
-            if search_field.key in provider.account_search_fields and not may_use_account:
+            if search_field.key in account_fields and account_provider is None:
                 continue
             value = request.args.get(search_field.key)
             if value is not None:
@@ -2977,6 +3001,8 @@ def api_metadata_search() -> Response | tuple[Response, int]:
         options = MetadataSearchOptions(
             query=query, limit=limit, page=page, sort=sort_order, fields=fields
         )
+        if account_provider is not None and any(key in fields for key in account_fields):
+            provider = account_provider
         search_result = provider.search_paginated(options)
 
         # Convert BookMetadata objects to dicts
@@ -3044,8 +3070,11 @@ def api_metadata_field_options() -> Response:
         if not provider or not provider.is_available():
             return jsonify({"options": []})
 
-        if field_key in provider.account_search_fields and not _session_may_use_provider_account():
-            return jsonify({"options": []})
+        if field_key in provider.account_search_fields:
+            account_provider = _resolve_account_provider(provider.name)
+            if account_provider is None:
+                return jsonify({"options": []})
+            provider = account_provider
 
         options = provider.get_search_field_options(field_key, query=query_text or None)
         return jsonify({"options": options})
@@ -3071,6 +3100,39 @@ def _session_may_use_provider_account() -> bool:
     Otherwise only an admin may use them.
     """
     return get_auth_mode() == "none" or bool(session.get("is_admin", False))
+
+
+# The setting that holds a user's own account token for a provider that has accounts.
+_ACCOUNT_TOKEN_SETTINGS = {"hardcover": "HARDCOVER_SYNC_TOKEN"}
+
+
+def _own_account_provider(provider_name: str) -> MetadataProvider | None:
+    """The provider signed in as the current user's own account, or None if they have none."""
+    setting = _ACCOUNT_TOKEN_SETTINGS.get(provider_name)
+    db_user_id = get_session_db_user_id(session)
+    if setting is None or db_user_id is None:
+        return None
+    token = app_config.get_user_override(setting, user_id=db_user_id)
+    if not isinstance(token, str) or not token.strip():
+        return None
+    from shelfmark.metadata_providers import get_provider
+
+    provider = get_provider(provider_name, api_key=token.strip(), own_account=True)
+    return provider if provider.is_available() else None
+
+
+def _resolve_account_provider(provider_name: str) -> MetadataProvider | None:
+    """The provider to use for this session's own lists and shelves, or None.
+
+    A user who connected their own account (their Hardcover token) uses that. Otherwise the
+    instance account answers, but only for an admin or when no authentication is configured.
+    """
+    own = _own_account_provider(provider_name)
+    if own is not None:
+        return own
+    if not _session_may_use_provider_account():
+        return None
+    return _resolve_metadata_provider(provider_name)
 
 
 def _resolve_metadata_provider(provider_name: str) -> MetadataProvider:
@@ -3172,8 +3234,8 @@ def _handle_target_errors(
 @_handle_target_errors("Failed to load book targets")
 def api_metadata_book_targets(provider: str, book_id: str) -> Response | tuple[Response, int]:
     """Get provider-managed list/status targets for a specific book."""
-    prov = _resolve_metadata_provider(provider)
-    if not _session_may_use_provider_account():
+    prov = _resolve_account_provider(provider)
+    if prov is None:
         return jsonify({"options": []})
     return jsonify({"options": prov.get_book_targets(book_id)})
 
@@ -3183,7 +3245,7 @@ def api_metadata_book_targets(provider: str, book_id: str) -> Response | tuple[R
 @_handle_target_errors("Failed to load book targets")
 def api_metadata_book_targets_batch(provider: str) -> Response | tuple[Response, int]:
     """Get provider-managed list/status targets for multiple books."""
-    prov = _resolve_metadata_provider(provider)
+    prov = _resolve_account_provider(provider)
 
     payload = request.get_json(silent=True) or {}
     raw_ids = payload.get("book_ids", []) if isinstance(payload, dict) else []
@@ -3192,7 +3254,7 @@ def api_metadata_book_targets_batch(provider: str) -> Response | tuple[Response,
 
     book_ids = [str(bid) for bid in raw_ids[:50]]
 
-    if not _session_may_use_provider_account():
+    if prov is None:
         return jsonify({"results": {book_id: [] for book_id in book_ids}})
     return jsonify({"results": prov.get_book_targets_batch(book_ids)})
 
@@ -3204,9 +3266,11 @@ def api_metadata_book_targets_update(
     provider: str, book_id: str
 ) -> Response | tuple[Response, int]:
     """Set whether a book belongs to a provider-managed list or shelf."""
-    if not _session_may_use_provider_account():
-        return jsonify({"error": "Admin access required"}), 403
-    prov = _resolve_metadata_provider(provider)
+    prov = _resolve_account_provider(provider)
+    if prov is None:
+        return jsonify(
+            {"error": "Connect your own account in your settings to change lists and shelves"}
+        ), 403
 
     payload = request.get_json(silent=True) or {}
     target = str(payload.get("target", "")).strip() if isinstance(payload, dict) else ""

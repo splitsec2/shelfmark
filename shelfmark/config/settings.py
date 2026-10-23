@@ -36,7 +36,7 @@ from shelfmark.core.settings_registry import (
     register_on_save,
     register_settings,
 )
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
+from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS, DEFAULT_EBOOK_FORMATS
 
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_DEFAULT = 60
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_MAX = 3600
@@ -454,7 +454,7 @@ def general_settings() -> list[SettingsField]:
             label="Supported Book Formats",
             description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
             options=_FORMAT_OPTIONS,
-            default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
+            default=list(DEFAULT_EBOOK_FORMATS),
         ),
         MultiSelectField(
             key="SUPPORTED_AUDIOBOOK_FORMATS",
@@ -2162,3 +2162,8 @@ def advanced_settings() -> list[SettingsField]:
 
 
 register_on_save("advanced", _on_save_advanced)
+
+
+# Register the Hardcover Sync settings tab. Imported here (rather than at each
+# settings endpoint) so every code path that imports this module also registers it.
+from shelfmark.config import hardcover_sync_settings as _hardcover_sync_settings  # noqa: E402,F401

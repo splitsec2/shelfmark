@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
-import { ActivitySidebar } from './components/activity';
+import { ActivitySidebar, SeriesGapModal } from './components/activity';
 import { AdvancedFilters } from './components/AdvancedFilters';
 import { ConfigSetupBanner } from './components/ConfigSetupBanner';
 import { DetailsModal } from './components/DetailsModal';
@@ -96,6 +96,7 @@ import { policyTrace } from './utils/policyTrace';
 import { buildQueryTargets, findQueryTarget, getDefaultQueryTargetKey } from './utils/queryTargets';
 import { buildReleaseDownloadPayload, type ReleaseDownloadOptions } from './utils/releasePayload';
 import { applyRequestNoteToPayload } from './utils/requestConfirmation';
+import { buildPendingRequestKeys } from './utils/requestedBooks';
 import { bookFromRequestData } from './utils/requestFulfil';
 import {
   buildDirectRequestPayload,
@@ -388,6 +389,16 @@ function App() {
     socket,
   });
 
+  // The sidebar already keeps these records live over the socket, so flagging a
+  // requested result costs no call and clears as soon as the request is decided.
+  const pendingRequests = useMemo(
+    () =>
+      buildPendingRequestKeys(
+        requestItems.map((item) => item.requestRecord).filter((record) => record !== undefined),
+      ),
+    [requestItems],
+  );
+
   const dismissedDownloadTaskIds = useMemo(() => {
     const result = new Set<string>();
     for (const key of dismissedActivityKeys) {
@@ -666,6 +677,7 @@ function App() {
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selfSettingsOpen, setSelfSettingsOpen] = useState(false);
+  const [seriesGapsOpen, setSeriesGapsOpen] = useState(false);
   const [configBannerOpen, setConfigBannerOpen] = useState(false);
 
   // Wire up logout callback to clear search state
@@ -2642,11 +2654,13 @@ function App() {
             directTotalResults={directTotalResults}
             onShowToast={showToast}
             resultsSourceUrl={resultsSourceUrl}
+            pendingRequests={pendingRequests}
           />
 
           {selectedBook && (
             <DetailsModal
               book={selectedBook}
+              pendingRequests={pendingRequests}
               onClose={() => setSelectedBook(null)}
               onDownload={handleDownload}
               onShowToast={showToast}
@@ -2783,6 +2797,7 @@ function App() {
         onRequestDismiss={showRequestsTab ? handleRequestDismiss : undefined}
         onPinnedOpenChange={setSidebarPinnedOpen}
         pinnedTopOffset={headerHeight}
+        onOpenSeriesGaps={requestRoleIsAdmin ? () => setSeriesGapsOpen(true) : undefined}
       />
 
       <ToastContainer toasts={toasts} />
@@ -2801,6 +2816,15 @@ function App() {
         onClose={() => setSelfSettingsOpen(false)}
         onShowToast={showToast}
         onSettingsSaved={handleSettingsSaved}
+      />
+
+      <SeriesGapModal
+        isOpen={seriesGapsOpen}
+        onClose={() => setSeriesGapsOpen(false)}
+        onShowToast={showToast}
+        onRequested={() => {
+          void refreshActivitySnapshot();
+        }}
       />
 
       {/* Auto-show banner on startup for users without config */}

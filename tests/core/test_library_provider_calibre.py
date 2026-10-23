@@ -5,16 +5,22 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from shelfmark.core import library_index
 from shelfmark.core.library_providers import calibre
 from shelfmark.metadata_providers import BookMetadata
+from tests.core.fakes import FakeConfig, capture_log
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+pytestmark = pytest.mark.usefixtures("fake_app_config")
 
 _SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, uuid TEXT);
+CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, uuid TEXT, series_index REAL NOT NULL DEFAULT 1.0);
 CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, author INTEGER NOT NULL);
 CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
@@ -60,23 +66,22 @@ def _make_library(path: Path, *, wal: bool = False) -> None:
     conn.close()
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, path: Path, *, enabled: bool = True) -> None:
-    values: dict[str, Any] = {
-        "CALIBRE_LIBRARY_DB_PATH": str(path),
-        "LIBRARY_CHECK_CALIBRE_ENABLED": enabled,
-    }
-    monkeypatch.setattr(
-        calibre.app_config,
-        "get",
-        lambda key, default=None, user_id=None: values.get(key, default),
-    )
-    monkeypatch.setattr(library_index, "_cache", {})
+@pytest.fixture
+def calibre_library(tmp_path: Path, fake_app_config: FakeConfig) -> Callable[..., Path]:
+    """Build a Calibre library (unless ``create=False``) and point the provider at it."""
 
+    def make(
+        *, path: Path | None = None, wal: bool = False, enabled: bool = True, create: bool = True
+    ) -> Path:
+        path = path or tmp_path / "metadata.db"
+        if create:
+            _make_library(path, wal=wal)
+        fake_app_config.values.update(
+            CALIBRE_LIBRARY_DB_PATH=str(path), LIBRARY_CHECK_CALIBRE_ENABLED=enabled
+        )
+        return path
 
-def _infos(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    messages: list[str] = []
-    monkeypatch.setattr(calibre.logger, "info", lambda msg, *args: messages.append(msg % args))
-    return messages
+    return make
 
 
 def _by_token(entries: list[Any], token: str) -> Any:
@@ -95,11 +100,9 @@ def _dcc() -> BookMetadata:
 
 
 def test_indexes_titles_authors_series_and_identifiers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    calibre_library: Callable[..., Path],
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    calibre_library()
 
     entries = calibre.CalibreLibrary().fetch_entries()
 
@@ -126,22 +129,32 @@ def test_indexes_titles_authors_series_and_identifiers(
     assert (draft.isbns, draft.asins, draft.external_ids) == (frozenset(), frozenset(), frozenset())
 
 
-def test_reads_a_read_only_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
+def test_entries_carry_the_book_id_title_and_first_author(
+    calibre_library: Callable[..., Path],
+) -> None:
+    calibre_library()
+
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    omens = _by_token(entries, "omens")
+    assert (omens.item_id, omens.title, omens.author) == ("2", "Good Omens", "Terry Pratchett")
+    draft = _by_token(entries, "draft")
+    assert (draft.item_id, draft.title, draft.author) == ("3", "Untitled Draft", None)
+    assert all(entry.tags == frozenset() for entry in entries)
+
+
+def test_reads_a_read_only_file(calibre_library: Callable[..., Path]) -> None:
+    path = calibre_library()
     path.chmod(0o444)
-    _configure(monkeypatch, path)
 
     assert len(calibre.CalibreLibrary().fetch_entries()) == 4
 
 
 def test_wal_reads_see_uncheckpointed_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path, wal=True)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    path = calibre_library(wal=True)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     writer = sqlite3.connect(path)
     writer.execute("PRAGMA wal_autocheckpoint=0")
@@ -159,16 +172,14 @@ def test_wal_reads_see_uncheckpointed_writes(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root is not bound by directory permissions")
 def test_wal_without_side_files_on_a_read_only_mount_uses_a_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
     lib_dir = tmp_path / "library"
     lib_dir.mkdir()
-    path = lib_dir / "metadata.db"
-    _make_library(path, wal=True)
+    calibre_library(path=lib_dir / "metadata.db", wal=True)
     for suffix in ("-wal", "-shm"):
         (lib_dir / f"metadata.db{suffix}").unlink(missing_ok=True)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     lib_dir.chmod(0o555)
     try:
@@ -183,12 +194,10 @@ def test_wal_without_side_files_on_a_read_only_mount_uses_a_snapshot(
 
 
 def test_in_place_open_failure_falls_back_to_an_immutable_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
-    infos = _infos(monkeypatch)
+    calibre_library()
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     real_connect = sqlite3.connect
     uris: list[str] = []
@@ -208,13 +217,11 @@ def test_in_place_open_failure_falls_back_to_an_immutable_open(
 
 
 def test_locked_database_falls_back_to_a_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
     monkeypatch.setattr(calibre, "_BUSY_TIMEOUT_SECONDS", 0.01)
-    infos = _infos(monkeypatch)
+    infos = capture_log(monkeypatch, calibre.logger, "info")
 
     writer = sqlite3.connect(path, isolation_level=None)
     writer.execute("BEGIN EXCLUSIVE")
@@ -230,20 +237,15 @@ def test_locked_database_falls_back_to_a_snapshot(
 
 
 def test_unreadable_database_raises_and_the_facade_fails_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
 
     def always_fail(database: str, **kwargs: Any) -> sqlite3.Connection:
         raise sqlite3.OperationalError("disk I/O error")
 
     monkeypatch.setattr(calibre.sqlite3, "connect", always_fail)
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        library_index.logger, "warning", lambda msg, *args: warnings.append(msg % args)
-    )
+    warnings = capture_log(monkeypatch, library_index.logger, "warning")
 
     with pytest.raises(sqlite3.OperationalError):
         calibre.CalibreLibrary().fetch_entries()
@@ -254,10 +256,9 @@ def test_unreadable_database_raises_and_the_facade_fails_open(
 
 
 def test_missing_file_is_enabled_but_fetch_raises_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "missing.db"
-    _configure(monkeypatch, path)
+    path = calibre_library(path=tmp_path / "missing.db", create=False)
     provider = calibre.CalibreLibrary()
 
     assert provider.is_enabled() is True
@@ -272,24 +273,16 @@ def test_missing_file_is_enabled_but_fetch_raises_cleanly(
     assert library_index.is_in_library(_dcc(), "ebook") is False
 
 
-def test_disabled_provider_is_not_consulted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path, enabled=False)
+def test_disabled_provider_is_not_consulted(calibre_library: Callable[..., Path]) -> None:
+    calibre_library(enabled=False)
 
     assert calibre.CalibreLibrary().is_enabled() is False
     assert library_index.any_provider_enabled() is False
     assert library_index.is_in_library(_dcc(), "ebook") is False
 
 
-def test_enabled_provider_answers_ebook_lookups_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+def test_enabled_provider_answers_ebook_lookups_only(calibre_library: Callable[..., Path]) -> None:
+    path = calibre_library()
 
     assert library_index.any_provider_enabled() is True
     assert library_index.is_in_library(_dcc(), "ebook") is True
@@ -301,11 +294,9 @@ def test_enabled_provider_answers_ebook_lookups_only(
 
 
 def test_fingerprint_follows_the_database_and_wal_mtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, calibre_library: Callable[..., Path]
 ) -> None:
-    path = tmp_path / "metadata.db"
-    _make_library(path)
-    _configure(monkeypatch, path)
+    path = calibre_library()
     provider = calibre.CalibreLibrary()
 
     assert provider.fingerprint() == path.stat().st_mtime
@@ -316,3 +307,150 @@ def test_fingerprint_follows_the_database_and_wal_mtime(
     os.utime(wal, (later, later))
 
     assert provider.fingerprint() == later
+
+
+def _library_with(path: Path, books: list[tuple[int, str, str, str | None]]) -> None:
+    """A library of (id, title, author, series) rows."""
+    conn = sqlite3.connect(path)
+    conn.executescript(_SCHEMA)
+    series_ids: dict[str, int] = {}
+    for book_id, title, author, series_name in books:
+        conn.execute(
+            "INSERT INTO books(id, title, uuid) VALUES (?, ?, ?)", (book_id, title, f"u{book_id}")
+        )
+        conn.execute("INSERT INTO authors(id, name) VALUES (?, ?)", (book_id, author))
+        conn.execute(
+            "INSERT INTO books_authors_link(book, author) VALUES (?, ?)", (book_id, book_id)
+        )
+        if series_name:
+            sid = series_ids.setdefault(series_name, len(series_ids) + 1)
+            conn.execute("INSERT OR IGNORE INTO series(id, name) VALUES (?, ?)", (sid, series_name))
+            conn.execute(
+                "INSERT INTO books_series_link(book, series) VALUES (?, ?)", (book_id, sid)
+            )
+    conn.commit()
+    conn.close()
+
+
+def _owned(entries: list[Any], title: str, author: str) -> str | None:
+    book = BookMetadata(provider="hardcover", provider_id="x", title=title, authors=[author])
+    return library_index.match_entries(book, entries)
+
+
+def test_an_abbreviated_series_label_in_the_title_does_not_hide_an_owned_book(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # The library names books "Label NN: Title". When the label abbreviates the series
+    # ("HHG" for The Hitchhiker's Guide to the Galaxy) its words are in neither the
+    # series nor the author, and the book read as not owned, so it was fetched again.
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [
+            (1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy"),
+            (2, "DCC 7: This Inevitable Ruin", "Matt Dinniman", "Dungeon Crawler Carl"),
+        ],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Mostly Harmless", "Douglas Adams") == "owned"
+    assert _owned(entries, "This Inevitable Ruin", "Matt Dinniman") == "owned"
+
+
+def test_a_series_label_still_does_not_make_a_different_book_match(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [(1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy")],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Harmless", "Douglas Adams") is None
+    assert _owned(entries, "Mostly Harmless", "Someone Else") is None
+
+
+def test_a_title_prefix_without_a_series_is_left_alone(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # Only a book that has a series gets its leading "Label NN:" treated as the label.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, "Messiah 2: Dune", "Frank Herbert", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dune", "Frank Herbert") is None
+
+
+@pytest.mark.parametrize(
+    "shelf_title",
+    [
+        "Dungeon Crawler Carl (Full Cast Edition)",
+        "Dungeon Crawler Carl (Dramatized Adaptation)",
+        "Dungeon Crawler Carl [GraphicAudio]",
+    ],
+)
+def test_an_edition_marker_in_the_title_is_a_different_edition(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str
+) -> None:
+    # A bracketed marker with no number in it describes the edition. Owning a full-cast
+    # or dramatized recording is not owning the book it adapts, so the request must
+    # not be closed as already in the library.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "Matt Dinniman", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dungeon Crawler Carl", "Matt Dinniman") is None
+    # The same edition, asked for by its own name, is on the shelf.
+    assert _owned(entries, shelf_title, "Matt Dinniman") == "owned"
+
+
+@pytest.mark.parametrize(
+    ("shelf_title", "series"),
+    [
+        ("Kiss the Girls (Alex Cross Series #11)", None),
+        ("Kiss the Girls (Alex Cross, Book 2)", None),
+        ("Alex Cross 02: Kiss the Girls", "Alex Cross"),
+        ("Kiss the Girls (Illustrated Edition)", None),
+        ("Kiss the Girls (Unabridged)", None),
+    ],
+)
+def test_series_metadata_and_printing_words_in_the_title_do_not_hide_the_book(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str, series: str | None
+) -> None:
+    # A numbered parenthetical is the series by Calibre convention, often in place of
+    # the series field, and a printing word changes nothing about which work it is.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "James Patterson", series)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Kiss the Girls", "James Patterson") == "owned"
+
+
+def test_entries_carry_the_series_its_position_and_the_first_author(
+    calibre_library: Callable[..., Path],
+) -> None:
+    path = calibre_library()
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE books SET series_index = 2.5 WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    dcc = _by_token(entries, "dinniman")
+    assert (dcc.series_name, dcc.series_index, dcc.author) == (
+        "Dungeon Crawler Carl",
+        2.5,
+        "Matt Dinniman",
+    )
+    # Calibre keeps a position for every book; without a series it means nothing.
+    omens = _by_token(entries, "omens")
+    assert (omens.series_name, omens.series_index, omens.author) == (None, None, "Terry Pratchett")
+    untitled = _by_token(entries, "untitled")
+    assert untitled.author is None

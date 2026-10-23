@@ -146,7 +146,7 @@ Optional static API key. When set, requests carrying it as 'Authorization: Beare
 
 #### `SHELFMARK_API_KEY_READONLY`
 
-Optional second API key for dashboards. Send it like `SHELFMARK_API_KEY`. It can only `GET /api/stats` (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
+Optional second API key for dashboards. Send it like `SHELFMARK_API_KEY`. It can only `GET /api/stats` (counters and scheduler health, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
 
 - **Type:** string
 - **Default:** `unset`
@@ -275,6 +275,8 @@ Seconds since the last WireGuard handshake before the healthcheck bounces the tu
 | `AUDIOBOOK_LIBRARY_URL` | Adds a separate navigation button for your audiobook library (Audiobookshelf, Plex, etc). When both URLs are set, icons are shown instead of text. | string | _none_ |
 | `LIBRARY_CHECK_CALIBRE_ENABLED` | Read the Calibre metadata.db and mark search results you already own, so you do not download a second copy. Read only, nothing is written to the library. | boolean | `false` |
 | `CALIBRE_LIBRARY_DB_PATH` | Path to metadata.db as seen from inside the Shelfmark container. Mount the Calibre library folder read-only, e.g. /path/to/calibre-library:/calibre-library:ro. | string | `/calibre-library/metadata.db` |
+| `CROSS_FORMAT_ABS_TAGGING_ENABLED` | Tag every Audiobookshelf item whose ebook is in Calibre on each sync cycle, and remove the tag when the ebook goes. Needs both library checks and an Audiobookshelf token whose user can update items. | boolean | `false` |
+| `CROSS_FORMAT_ABS_TAG` | The tag written to audiobooks whose ebook is in Calibre. | string | `ebook-in-library` |
 | `SUPPORTED_FORMATS` | Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found. | string (comma-separated) | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
 | `SUPPORTED_AUDIOBOOK_FORMATS` | Audiobook formats to include in search results. ZIP/RAR archives are extracted automatically and audiobook files are used if found. | string (comma-separated) | `m4b,mp3,m4a,mp4,flac,ogg,wma,aac,wav,opus,zip,rar` |
 
@@ -325,6 +327,24 @@ Path to metadata.db as seen from inside the Shelfmark container. Mount the Calib
 
 - **Type:** string
 - **Default:** `/calibre-library/metadata.db`
+
+#### `CROSS_FORMAT_ABS_TAGGING_ENABLED`
+
+**Tag audiobooks whose ebook is in Calibre**
+
+At the end of every sync cycle, tag each Audiobookshelf item whose ebook is in the Calibre library and remove the tag from items whose ebook is gone. Only this tag is ever touched. Needs both library checks on and an Audiobookshelf token whose user has the "Can update" permission. See [Library Check](library-check.md#cross-format-markers).
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `CROSS_FORMAT_ABS_TAG`
+
+**Audiobookshelf tag**
+
+The tag written to audiobooks whose ebook is in Calibre.
+
+- **Type:** string
+- **Default:** `ebook-in-library`
 
 #### `SUPPORTED_FORMATS`
 
@@ -1551,9 +1571,12 @@ Automatically retry search without category filtering if no results are found
 | `SLSKD_ISOLATE_DOWNLOADS` | Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk. | boolean | `true` |
 | `SLSKD_DESTINATION_PREFIX` | The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder. | string | `shelfmark` |
 | `SLSKD_KEEP_COMPLETED` | Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported. | boolean | `true` |
+| `SLSKD_FINISH_LEFTOVERS` | A restart can land after the last file arrives and before it is copied to your library. At startup, and at each sync cycle, a download folder that holds every file asked for, whose download never completed, is imported without downloading anything again. | boolean | `true` |
+| `SLSKD_CLEAN_LEFTOVERS_DAYS` | Remove the folder of a failed or abandoned download, once the download is this old (one day when its request already has the book or was given up on). Folders holding every file, and the folders of running downloads, are never removed. 0 keeps them. | number | `0` |
 | `SLSKD_SEARCH_TIMEOUT` | How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower. | number | `15` |
 | `SLSKD_RESPONSE_LIMIT` | Stop a search early once this many peers have answered | number | `100` |
 | `SLSKD_QUEUE_TIMEOUT_MINUTES` | Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely. | number | `60` |
+| `SLSKD_CHAT_AUTOPROVE` | Some uploaders block downloads until you type a word in a private message ("please type 'download' in this chat"). Shelfmark replies with the word the message asks for, at most once per user every 12 hours, and logs each reply. Checked while a download is running. | boolean | `true` |
 | `SLSKD_REMOVE_COMPLETED` | Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder. | boolean | `true` |
 
 <details>
@@ -1622,6 +1645,25 @@ Leave the finished files (and their transfer records) in slskd after Shelfmark c
 - **Type:** boolean
 - **Default:** `true`
 
+#### `SLSKD_FINISH_LEFTOVERS`
+
+**Import finished folders an interruption left behind**
+
+A restart can land after the last file arrives and before it is copied to your library. At startup, and at each sync cycle, a download folder that holds every file asked for, whose download never completed, is imported without downloading anything again.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_CLEAN_LEFTOVERS_DAYS`
+
+**Remove partial download folders after (days)**
+
+Remove the folder of a failed or abandoned download, once the download is this old (one day when its request already has the book or was given up on). Folders holding every file, and the folders of running downloads, are never removed. 0 keeps them.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 365
+
 #### `SLSKD_SEARCH_TIMEOUT`
 
 **Search Wait (seconds)**
@@ -1651,6 +1693,15 @@ Give up when the peer has not started sending within this long. Set to 0 to wait
 - **Type:** number
 - **Default:** `60`
 - **Constraints:** min: 0, max: 1440
+
+#### `SLSKD_CHAT_AUTOPROVE`
+
+**Answer anti-leech chat challenges**
+
+Some uploaders block downloads until you type a word in a private message ("please type 'download' in this chat"). Shelfmark replies with the word the message asks for, at most once per user every 12 hours, and logs each reply. Checked while a download is running.
+
+- **Type:** boolean
+- **Default:** `true`
 
 #### `SLSKD_REMOVE_COMPLETED`
 
@@ -1937,6 +1988,7 @@ How long to keep cached search results before they expire.
 | `TORRENT_MIN_SEEDERS` | Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off. | number | `1` |
 | `PROWLARR_TORRENT_POST_IMPORT_CATEGORY` | Category or label to assign after a successful import | string | _empty string_ |
 | `TORRENT_STALL_TIMEOUT_MINUTES` | How long a torrent can go without any progress before Shelfmark cancels it. Applies from when the torrent starts and restarts each time it moves. Raise it for slow swarms or magnets that take a while to find peers, or lower it to give up on dead torrents sooner. | number | `15` |
+| `STALE_TORRENT_HOURS` | Remove a torrent from Shelfmark's categories when it is stalled or cannot fetch its metadata, has had no activity for this many hours, and no running download owns it. Its partial data goes with it. Torrents still downloading, queued, or finished are never touched. 0 keeps them. Checked at each sync cycle; only qBittorrent is supported. | number | `0` |
 | `PROWLARR_USENET_CLIENT` | Choose which usenet client to use | string (choice) | _empty string_ |
 | `NZBGET_URL` | URL of your NZBGet instance | string | _none_ |
 | `NZBGET_USERNAME` | NZBGet control username | string | `nzbget` |
@@ -2397,6 +2449,16 @@ How long a torrent can go without any progress before Shelfmark cancels it. Appl
 - **Type:** number
 - **Default:** `15`
 - **Constraints:** min: 5, max: 60
+
+#### `STALE_TORRENT_HOURS`
+
+**Remove dead torrents after (hours)**
+
+Remove a torrent from Shelfmark's categories when it is stalled or cannot fetch its metadata, has had no activity for this many hours, and no running download owns it. Its partial data goes with it. Torrents still downloading, queued, or finished are never touched. 0 keeps them. Checked at each sync cycle; only qBittorrent is supported.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 720
 
 #### `PROWLARR_USENET_CLIENT`
 

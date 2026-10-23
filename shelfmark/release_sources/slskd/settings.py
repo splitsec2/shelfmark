@@ -148,6 +148,32 @@ def slskd_config_settings() -> list[SettingsField]:
             ),
             show_when={"field": "SLSKD_ISOLATE_DOWNLOADS", "value": True},
         ),
+        CheckboxField(
+            key="SLSKD_FINISH_LEFTOVERS",
+            label="Import finished folders an interruption left behind",
+            default=True,
+            description=(
+                "A restart can land after the last file arrives and before it is copied to "
+                "your library. At startup, and at each sync cycle, a download folder that "
+                "holds every file asked for, whose download never completed, is imported "
+                "without downloading anything again."
+            ),
+            show_when={"field": "SLSKD_ISOLATE_DOWNLOADS", "value": True},
+        ),
+        NumberField(
+            key="SLSKD_CLEAN_LEFTOVERS_DAYS",
+            label="Remove partial download folders after (days)",
+            default=0,
+            min_value=0,
+            max_value=365,
+            description=(
+                "Remove the folder of a failed or abandoned download, once the download is "
+                "this old (one day when its request already has the book or was given up on). "
+                "Folders holding every file, and the folders of running downloads, are never "
+                "removed. 0 keeps them."
+            ),
+            show_when={"field": "SLSKD_ISOLATE_DOWNLOADS", "value": True},
+        ),
         NumberField(
             key="SLSKD_SEARCH_TIMEOUT",
             label="Search Wait (seconds)",
@@ -179,6 +205,18 @@ def slskd_config_settings() -> list[SettingsField]:
             default=60,
             min_value=0,
             max_value=1440,
+            show_when={"field": "SLSKD_ENABLED", "value": True},
+        ),
+        CheckboxField(
+            key="SLSKD_CHAT_AUTOPROVE",
+            label="Answer anti-leech chat challenges",
+            default=True,
+            description=(
+                "Some uploaders block downloads until you type a word in a private message "
+                "(\"please type 'download' in this chat\"). Shelfmark replies with the word "
+                "the message asks for, at most once per user every 12 hours, and logs each "
+                "reply. Checked while a download is running."
+            ),
             show_when={"field": "SLSKD_ENABLED", "value": True},
         ),
         CheckboxField(

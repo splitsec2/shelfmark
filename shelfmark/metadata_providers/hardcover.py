@@ -27,6 +27,7 @@ from shelfmark.core.settings_registry import (
     SettingsField,
     register_settings,
 )
+from shelfmark.core.text_match import strip_alternate_title
 from shelfmark.download.network import get_ssl_verify
 from shelfmark.metadata_providers import (
     BookMetadata,
@@ -63,6 +64,9 @@ HARDCOVER_LIST_URL_PATTERN = re.compile(
     r"^/(?:@([\w.-]+)/)?lists?/([\w-]+)/?$",
     re.IGNORECASE,
 )
+
+# A user's own Hardcover account by API key: (user id, username). Kept in memory only.
+_OWN_ACCOUNT_IDENTITIES: dict[str, tuple[str, str | None]] = {}
 
 LIST_LOOKUP_QUERY = """
 query LookupListsBySlug($slug: String!) {
@@ -976,6 +980,9 @@ def _simplify_author_for_search(author: str) -> str | None:
     return candidate
 
 
+_TITLE_COLON_SPLIT = re.compile(r"^(.+?)\s*:\s*(.+)$")
+
+
 def _compute_search_title(
     title: str,
     subtitle: str | None,
@@ -985,22 +992,30 @@ def _compute_search_title(
     """Compute a provider-specific, *looser* title for indexer searching.
 
     Goal: produce a string that maximizes recall in downstream sources (Prowlarr,
-    IRC bots, etc.). Being too detailed is counterproductive.
+    IRC bots, AudiobookBay), which AND their search terms, so being too detailed is
+    counterproductive. Auto-download also matches releases against this title, so it
+    must still name this book and no other.
 
-    Hardcover often stores titles in a "Series: Book Title" format and places the
-    standalone book title in `subtitle`. When this appears to be the case, prefer
-    the subtitle (unless it looks like a series position or other noise).
+    Hardcover stores "Title: Subtitle" with the subtitle repeated in `subtitle`, and a
+    series volume as "Series: Book Title" with the book's title in `subtitle`. The two
+    look the same; only the series name tells them apart. When the prefix is the series
+    name the suffix is the book's title; otherwise the prefix is the title and the
+    subtitle is description ("An Appetite for Wonder: The Making of a Scientist" is
+    searched as "An Appetite for Wonder"). A subtitle is never taken on its own:
+    "Vittorio, the Vampire" with subtitle "The Vampire" used to search for "The
+    Vampire", which found every vampire novel but this one.
 
     Additional heuristics:
-    - If Hardcover prefixes the series in the title, remove it.
-    - Drop trailing parenthetical qualifiers.
+    - Drop trailing parenthetical qualifiers ("(Unabridged)").
+    - Drop an alternate title ("The Hobbit, or There and Back Again" is searched and
+      matched as "The Hobbit"; the full title stays on the book for display).
     """
     if not title:
         return None
 
     original_title = " ".join(title.split()).strip()
 
-    normalized_title = _strip_parenthetical_suffix(original_title)
+    normalized_title = strip_alternate_title(_strip_parenthetical_suffix(original_title))
 
     normalized_subtitle = " ".join(subtitle.split()).strip() if subtitle else ""
     normalized_subtitle = (
@@ -1010,57 +1025,22 @@ def _compute_search_title(
     if normalized_subtitle and normalized_subtitle.lower() == normalized_title.lower():
         normalized_subtitle = ""
 
-    # If subtitle is noise, strip it from the title and use just the prefix.
-    if normalized_subtitle and _is_probably_series_position(normalized_subtitle):
-        match = re.match(r"^(.+?)\s*:\s*(.+)$", normalized_title)
-        if match:
-            suffix = _strip_parenthetical_suffix(match.group(2).strip())
-            if (
-                normalized_subtitle.lower() == suffix.lower()
-                or normalized_subtitle.lower() in suffix.lower()
-            ):
+    series_normalized = " ".join(series_name.split()).strip() if series_name else ""
+
+    match = _TITLE_COLON_SPLIT.match(normalized_title)
+    if match:
+        prefix = match.group(1).strip()
+        suffix = _strip_parenthetical_suffix(match.group(2).strip())
+        prefix_is_series = bool(series_normalized) and prefix.lower() == series_normalized.lower()
+        subtitle_is_suffix = bool(normalized_subtitle) and (
+            normalized_subtitle.lower() == suffix.lower()
+            or normalized_subtitle.lower() in suffix.lower()
+        )
+        if prefix_is_series or subtitle_is_suffix:
+            # "Series: Book 1" names nothing to search for on either side of the colon.
+            if _is_probably_series_position(suffix):
                 return None
-
-    # Prefer subtitle when it looks like the real title.
-    if normalized_subtitle and not _is_probably_series_position(normalized_subtitle):
-        match = re.match(r"^(.+?)\s*:\s*(.+)$", normalized_title)
-        if match:
-            prefix = match.group(1).strip()
-            suffix = _strip_parenthetical_suffix(match.group(2).strip())
-
-            prefix_words = len(prefix.split()) if prefix else 0
-            subtitle_words = len(normalized_subtitle.split())
-
-            series_normalized = " ".join(series_name.split()).strip() if series_name else ""
-            if series_normalized and prefix.lower() == series_normalized.lower():
-                return normalized_subtitle
-
-            # If the subtitle is much longer than the prefix, treat it as a descriptive subtitle.
-            if prefix and subtitle_words >= (prefix_words + 4):
-                return prefix
-
-            # Otherwise assume "Series: Book Title" and prefer the subtitle.
-            if (
-                normalized_subtitle.lower() == suffix.lower()
-                or normalized_subtitle.lower() in suffix.lower()
-            ):
-                return normalized_subtitle
-
-        # Fallback: if title contains the subtitle, this is likely "Series: Subtitle".
-        if normalized_subtitle.lower() in normalized_title.lower():
-            return normalized_subtitle
-
-    # If we know the series name (from full book fetch), strip it.
-    if series_name:
-        series_normalized = " ".join(series_name.split()).strip()
-        if series_normalized:
-            # Common Hardcover format: "Series: Book Title".
-            prefix = f"{series_normalized}:"
-            if normalized_title.lower().startswith(prefix.lower()):
-                candidate = normalized_title[len(prefix) :].strip()
-                candidate = _strip_parenthetical_suffix(candidate)
-                if candidate and candidate.lower() != normalized_title.lower():
-                    return candidate
+            return suffix if prefix_is_series else prefix
 
     # Last resort: return a cleaned version of the title if we removed noise.
     if normalized_title and normalized_title.lower() != original_title.lower():
@@ -1128,10 +1108,16 @@ class HardcoverProvider(MetadataProvider):
         ),
     )
 
-    def __init__(self, api_key: str | None = None) -> None:
-        """Initialize provider with optional API key (falls back to config)."""
+    def __init__(self, api_key: str | None = None, *, own_account: bool = False) -> None:
+        """Initialize provider with optional API key (falls back to config).
+
+        ``own_account`` marks a key that belongs to one user rather than to the instance. The
+        account the instance is connected to is remembered in the settings; a user's own is
+        looked up from Hardcover and kept in memory, so the two are never mixed up.
+        """
         raw_key = api_key or app_config.get("HARDCOVER_API_KEY", "")
         self.api_key = _normalize_hardcover_api_key(raw_key)
+        self._own_account = own_account
         self.session = requests.Session()
         if self.api_key:
             self.session.headers.update(
@@ -1299,8 +1285,27 @@ class HardcoverProvider(MetadataProvider):
 
         return self._fetch_list_books_by_id(list_id, page, limit)
 
+    def _own_account_identity(self) -> tuple[str, str | None] | None:
+        """(user id, username) of a user's own Hardcover account, from memory or a me query."""
+        known = _OWN_ACCOUNT_IDENTITIES.get(self.api_key)
+        if known is not None:
+            return known
+        result = self._execute_query("query { me { id, username } }", {})
+        me_data = result.get("me", {}) if result else {}
+        if isinstance(me_data, list) and me_data:
+            me_data = me_data[0]
+        if not isinstance(me_data, dict) or me_data.get("id") is None:
+            return None
+        username = str(me_data.get("username") or "").strip() or None
+        identity = (str(me_data["id"]), username)
+        _OWN_ACCOUNT_IDENTITIES[self.api_key] = identity
+        return identity
+
     def _resolve_current_user_id(self) -> str | None:
         """Resolve current Hardcover user id from saved settings or API me query."""
+        if self._own_account:
+            identity = self._own_account_identity()
+            return identity[0] if identity else None
         connected_user_id = _get_connected_user_id()
         if connected_user_id:
             return connected_user_id
@@ -1919,7 +1924,11 @@ class HardcoverProvider(MetadataProvider):
         # Build source URL for the status shelf
         source_url = None
         url_slug = HARDCOVER_STATUS_URL_SLUGS.get(status_id)
-        username = _get_connected_username()
+        if self._own_account:
+            identity = self._own_account_identity()
+            username = identity[1] if identity else None
+        else:
+            username = _get_connected_username()
         if url_slug and username:
             source_url = f"https://hardcover.app/@{username}/books/{url_slug}"
 
