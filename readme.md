@@ -16,7 +16,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Replaced upstream by [#1516](https://github.com/calibrain/shelfmark/pull/1516) (1 of 5) and [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 5, the Audiobookshelf library check), both open. Calibrain asked for the rest of the Hardcover work to be stacked on #1516. |
+| Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Replaced upstream by [#1516](https://github.com/calibrain/shelfmark/pull/1516) (1 of 5), which has merged, and [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 5, the Audiobookshelf library check), which is open. Calibrain asked for the rest of the Hardcover work to be stacked on #1516. |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Open upstream: [#1533](https://github.com/calibrain/shelfmark/pull/1533) (3 of 5) |
 | Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
 | Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
@@ -82,7 +82,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Fifty-one have merged so far.
+there rather than living in this fork. Sixty-two have merged so far.
 
 Features, refactors and auth:
 
@@ -210,19 +210,42 @@ Merged on October 21, after that batch:
 - [#1514](https://github.com/calibrain/shelfmark/pull/1514) drop three unused imports that fail
   Python Quality
 
-Open:
+Merged on October 22:
 
 - [#1516](https://github.com/calibrain/shelfmark/pull/1516) (1 of 5) optional Hardcover wishlist
   sync with automated downloading, replacing #1047
+- [#1532](https://github.com/calibrain/shelfmark/pull/1532) one default and one reader for the
+  Supported Book Formats list
+- [#1537](https://github.com/calibrain/shelfmark/pull/1537) each Direct Download provider gets its
+  own slice of the search budget, so a stuck Anna's Archive no longer starves OceanofPDF
+  (issue [#1531](https://github.com/calibrain/shelfmark/issues/1531))
+- [#1538](https://github.com/calibrain/shelfmark/pull/1538) a late progress update no longer reopens
+  a finished task
+- [#1539](https://github.com/calibrain/shelfmark/pull/1539) wait up to 30 s for a busy SQLite writer
+  instead of the 5 s default
+- [#1540](https://github.com/calibrain/shelfmark/pull/1540) the startup reconcile guard catches the
+  same errors as the rest of the import
+- [#1541](https://github.com/calibrain/shelfmark/pull/1541) a non-admin's status message loses the
+  links it quotes
+- [#1542](https://github.com/calibrain/shelfmark/pull/1542) say that the per-source limit replaces
+  Max Concurrent Downloads
+- [#1544](https://github.com/calibrain/shelfmark/pull/1544) less repeated work on the search and
+  cover paths (cover index flush, settings reload, library matching)
+- [#1545](https://github.com/calibrain/shelfmark/pull/1545) less repeated work on the status and
+  activity paths
+- [#1546](https://github.com/calibrain/shelfmark/pull/1546) reuse connections and cache Anna's
+  Archive download counts
+
+Open:
+
 - [#1519](https://github.com/calibrain/shelfmark/pull/1519) (2 of 5) Audiobookshelf library check,
-  and the sync fails closed when a library cannot be read, stacked on #1516
+  and the sync fails closed when a library cannot be read, on top of the merged #1516
 - [#1533](https://github.com/calibrain/shelfmark/pull/1533) (3 of 5) ebooks, audiobooks or both, and stricter matching for automatic
   downloads, stacked on #1519
 - [#1534](https://github.com/calibrain/shelfmark/pull/1534) (4 of 5) retries, error counting and a back-off for requests nothing
   matches, stacked on #1533
 - [#1535](https://github.com/calibrain/shelfmark/pull/1535) (5 of 5) owned books, simpler queries, dead sources and failed releases,
   stacked on #1534
-- [#1532](https://github.com/calibrain/shelfmark/pull/1532) one default and one reader for the Supported Book Formats list
 
 The rest of the feature branches stay here because upstream has said this class of feature
 won't be merged. That is a scope decision of the original maintainer, and I respect that.
