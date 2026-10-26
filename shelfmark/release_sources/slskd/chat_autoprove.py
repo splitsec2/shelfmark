@@ -4,6 +4,10 @@ Some uploaders run bots that block your downloads until you type a token in a
 private message ("please type 'download' in this chat to be added to my
 whitelist"). The downloads then sit queued until someone answers.
 
+The challenge patterns and the one-reply-per-cooldown idea come from SoulSync's
+``core/chat_autoprove.py`` (https://github.com/Nezreka/SoulSync, commit 445473b, MIT license,
+by Nezreka), reworked here for slskd's client and Shelfmark's download handler.
+
 Deliberately conservative:
   - private messages only; only inbound, unacknowledged messages can trigger a reply
   - the token comes from the message itself and must match ``[A-Za-z0-9_-]{1,24}``
