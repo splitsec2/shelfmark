@@ -20,8 +20,8 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 |---|---|
 | Hardcover shelf sync → pending requests, strict-match auto-download, Audiobookshelf library check | Upstream PR [#1047](https://github.com/calibrain/shelfmark/pull/1047) by [@InfiniteAvenger](https://github.com/InfiniteAvenger), rebased here with authorship preserved, plus fixes (cover URLs proxied at request creation, request owner resolved instead of hard-coded, Audiobookshelf honours `disabled_local` certificate validation for a LAN server) Replaced upstream by a series of five pull requests, [#1516](https://github.com/calibrain/shelfmark/pull/1516), [#1519](https://github.com/calibrain/shelfmark/pull/1519), [#1533](https://github.com/calibrain/shelfmark/pull/1533), [#1534](https://github.com/calibrain/shelfmark/pull/1534) and [#1535](https://github.com/calibrain/shelfmark/pull/1535), all merged. Calibrain asked for the series to be stacked on #1516. |
 | *Request as* ebooks, audiobooks or both, with format matching and source priority per content type | This fork. Merged upstream: [#1533](https://github.com/calibrain/shelfmark/pull/1533) |
-| Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Fork only |
-| Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Fork only |
+| Per-user Hardcover accounts: each user connects their own account and their shelf syncs to requests they own | This fork. Open upstream: [#1592](https://github.com/calibrain/shelfmark/pull/1592) |
+| Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Not sent yet (an upstream candidate, after [#1592](https://github.com/calibrain/shelfmark/pull/1592)) |
 | Matching fixes: sources with no seeder count are no longer rejected, multi-book packs and sequels ("Dune Messiah" for "Dune") no longer satisfy a single-book request, same-format candidates rank by download count | This fork. Merged upstream: [#1533](https://github.com/calibrain/shelfmark/pull/1533) |
 | Prefers one m4b over a folder of chapter files, unless the m4b is much smaller than the rest (a size guard, `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`) | This fork. Merged upstream: [#1533](https://github.com/calibrain/shelfmark/pull/1533) |
 | A failed or stalled download is retried with a different release, up to three times, and an undelivered synced request is retried after 7 days. A release that failed or stalled is kept out of the search for 7 days (`AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS`) and then tried again, and one that stalled or had no seeders for one request is skipped for every request in that time, and a request still showing queued or downloading after its download ended is corrected from the history, so the retry no longer waits for someone to open the page | This fork. Merged upstream: the retry after a cooldown in [#1534](https://github.com/calibrain/shelfmark/pull/1534), the retry-after-days setting in [#1535](https://github.com/calibrain/shelfmark/pull/1535) |
@@ -33,7 +33,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 | Search fixes for requests that never matched: accents are folded ("é" matches "e"), the Hardcover title keeps the main title unless the prefix is the series, an alternate title after ", or" is dropped, and "Part II", "Part Two" and "Part 2" read the same | This fork. Merged upstream: [#1533](https://github.com/calibrain/shelfmark/pull/1533) |
 | When nothing matches, up to three simpler forms of the title are tried on each source, and an AudiobookBay result with no author in the listing is checked against the author credited on its page | This fork. Merged upstream: the AudiobookBay author lookup in [#1533](https://github.com/calibrain/shelfmark/pull/1533), the simpler queries in [#1535](https://github.com/calibrain/shelfmark/pull/1535) |
 | Optional Audible check (off by default): an audiobook request that stays unmatched is looked up on Audible US and UK through Audiobookshelf, and the request says whether a recording exists. It never declines a request, because Audible search misses real recordings (novellas only sold in a collection, retitled books) | This fork. Merged upstream: [#1535](https://github.com/calibrain/shelfmark/pull/1535) |
-| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks. A series with ebooks and no audiobooks can still have its audiobooks requested, and Hardcover's duplicate or mis-credited listings of a series are passed over for the real one | This fork. Fork only |
+| Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks. A series with ebooks and no audiobooks can still have its audiobooks requested, and Hardcover's duplicate or mis-credited listings of a series are passed over for the real one | This fork. Not sent yet (an upstream candidate) |
 | The sync scheduler reports its health: `/api/stats` carries the age of the last cycle, its errors and a healthy flag, and `/api/health` says whether it is running. One cycle is bounded, so a stuck call is given up on and the next cycle can run | This fork. Not sent yet (an upstream candidate) |
 | A bad value in the sync interval setting no longer ends the scheduler thread, and the history check opens one database connection per sync instead of one per book | This fork. Open upstream: [#1569](https://github.com/calibrain/shelfmark/pull/1569) |
 | A user's own Hardcover token (and any other per-user secret) is masked in settings payloads and shown to its owner only on request | This fork. Fork only |
@@ -42,22 +42,22 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork. Fork only |
-| A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork. Merged upstream: the Audiobookshelf half in [#1519](https://github.com/calibrain/shelfmark/pull/1519), the Calibre half in [#1535](https://github.com/calibrain/shelfmark/pull/1535) |
+| Per-format "in your library" badges, one for the ebook and one for the audiobook, where upstream shows a single badge | This fork. Not sent yet (an upstream candidate) |
+| A series label in front of the title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") does not hide an owned book, in both the Calibre and the Audiobookshelf check | This fork. Not sent yet (an upstream candidate, both halves) |
 | Another edition is not the owned book: a full cast or dramatized audiobook, or a Calibre title marked as another edition, doesn't count as owning the regular one | Ported from [DrNgo/shelfmark-fork@3bc32b2](https://github.com/DrNgo/shelfmark-fork/commit/3bc32b2) by [@DrNgo](https://github.com/DrNgo). Merged upstream in [#1535](https://github.com/calibrain/shelfmark/pull/1535) |
 | Search results with a pending request say so ("Ebook requested", "Audiobook requested"), including requests the Hardcover sync made | Idea and helper from [DrNgo/shelfmark-fork@1b393c6](https://github.com/DrNgo/shelfmark-fork/commit/1b393c6) by [@DrNgo](https://github.com/DrNgo). Not sent upstream; it would need a restyle without our per-format pills |
-| Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork. Fork only |
+| Cross-format markers: finds the books you have in both Calibre and Audiobookshelf, and can tag those audiobooks (`ebook-in-library`) so a listener sees the ebook is there too. Tagging is off by default and has a dry-run preview | This fork. Not sent yet (an upstream candidate) |
 | A library that held books and then lists none is treated as a failed read, so a changed answer from the server can't make every book you own look missing and fetch duplicates | This fork. Merged upstream in [#1519](https://github.com/calibrain/shelfmark/pull/1519) |
 
 ### Sources and downloads
 
 | Change | Origin |
 |---|---|
-| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Not sent yet (an upstream candidate) |
-| A Soulseek uploader's anti-leech bot that blocks downloads until a word is typed in a private message gets that word as a reply, at most once per user every 12 hours, logged on each reply (`SLSKD_CHAT_AUTOPROVE`, on by default) | This fork. Not sent yet (an upstream candidate, would be sent with the default off) |
+| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Open upstream: [#1590](https://github.com/calibrain/shelfmark/pull/1590) |
+| A Soulseek uploader's anti-leech bot that blocks downloads until a word is typed in a private message gets that word as a reply, at most once per user every 12 hours, logged on each reply (`SLSKD_CHAT_AUTOPROVE`, on by default) | Adapted from [Nezreka/SoulSync@445473b](https://github.com/Nezreka/SoulSync/commit/445473b) by [@Nezreka](https://github.com/Nezreka). Open upstream as a draft, [#1591](https://github.com/calibrain/shelfmark/pull/1591), with the setting off by default there |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
-| Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (6 by default, 3 to 72, 0 turns it off, qBittorrent only), and owned by no running download. Only torrents this instance added are ever touched: it keeps a ledger of the hash of every torrent it adds, so a torrent added before the ledger, or one something else put in the same category, is never removed | This fork. Not sent yet (an upstream candidate; the scheduler it runs from has merged as [#1516](https://github.com/calibrain/shelfmark/pull/1516)) |
-| Soulseek leftovers (checked at the start of each sync cycle, before the sync and the auto-download pass): a download folder holding every file whose import an interruption cut off is imported without downloading again, partial folders are removed after `SLSKD_CLEAN_LEFTOVERS_DAYS`, and unfinished slskd transfers no running download owns are picked up again when their request still waits for them, or cancelled | This fork. Not sent yet (an upstream candidate; the scheduler it runs from has merged as [#1516](https://github.com/calibrain/shelfmark/pull/1516)) |
+| Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (6 by default, 3 to 72, 0 turns it off, qBittorrent only), and owned by no running download. Only torrents this instance added are ever touched: it keeps a ledger of the hash of every torrent it adds, so a torrent added before the ledger, or one something else put in the same category, is never removed | This fork. Not sent yet (an upstream candidate) |
+| Soulseek leftovers (checked at the start of each sync cycle, before the sync and the auto-download pass): a download folder holding every file whose import an interruption cut off is imported without downloading again, partial folders are removed after `SLSKD_CLEAN_LEFTOVERS_DAYS`, and unfinished slskd transfers no running download owns are picked up again when their request still waits for them, or cancelled | This fork. Not sent yet (an upstream candidate) |
 
 ### Requests and the activity list (admin)
 
@@ -87,7 +87,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Seventy-six have merged so far.
+there rather than living in this fork. Eighty-seven have merged so far.
 
 Features, refactors and auth:
 
@@ -260,19 +260,38 @@ Merged on October 23, the Hardcover series and a round of security and docs fixe
 - [#1566](https://github.com/calibrain/shelfmark/pull/1566) bring the plugin guides in line with the current code
 - [#1567](https://github.com/calibrain/shelfmark/pull/1567) small fixes from a check of the docs against the code
 
-Open:
+Merged on October 24 to 26, since then:
 
 - [#1568](https://github.com/calibrain/shelfmark/pull/1568) report a stopped download coordinator in `/api/health`
 - [#1569](https://github.com/calibrain/shelfmark/pull/1569) keep the scheduler alive on an unreadable interval, share one history connection
   per sync
-- [#1570](https://github.com/calibrain/shelfmark/pull/1570) map the qBittorrent 5 stopped states and forcedMetaDL
 - [#1571](https://github.com/calibrain/shelfmark/pull/1571) mask userinfo and path-segment credentials, route stray loggers through the
   formatter
 - [#1572](https://github.com/calibrain/shelfmark/pull/1572) a swarm note change is not activity for the stall timer
+- [#1573](https://github.com/calibrain/shelfmark/pull/1573) hand a finished wrong-type directory on instead of polling out the timeout
+- [#1574](https://github.com/calibrain/shelfmark/pull/1574) offer the seed settings for qBittorrent only
+- [#1576](https://github.com/calibrain/shelfmark/pull/1576) one lookup for the supported formats, public names for two shared helpers
+- [#1577](https://github.com/calibrain/shelfmark/pull/1577) import a qBittorrent torrent only when every listed file is on disk
+- [#1580](https://github.com/calibrain/shelfmark/pull/1580) the image cache flush window test no longer depends on float rounding
+- [#1587](https://github.com/calibrain/shelfmark/pull/1587) match a shelf title against the full title when the search title is only the
+  series
+- [#1588](https://github.com/calibrain/shelfmark/pull/1588) say what applies on a user's own notification routes page
+
+Open:
+
+- [#1570](https://github.com/calibrain/shelfmark/pull/1570) map the qBittorrent 5 stopped states and forcedMetaDL
+- [#1578](https://github.com/calibrain/shelfmark/pull/1578) one module for taking credentials and links out of text
+- [#1579](https://github.com/calibrain/shelfmark/pull/1579) let a book be requested alongside downloads
+- [#1590](https://github.com/calibrain/shelfmark/pull/1590) try a Soulseek batch enqueue once more when slskd answers 500
+- [#1591](https://github.com/calibrain/shelfmark/pull/1591) answer anti-leech chat challenges from Soulseek uploaders, a draft with the
+  setting off by default
+- [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
+  [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588))
 
 The Hardcover sync and the Audiobookshelf check, which this fork carried for a month, went
-upstream in those five parts. What stays here is what upstream has not been asked for or has
-said it won't take: the changes marked fork only or not sent yet above.
+upstream in those five parts. What stays here is what upstream has not been asked for yet: the
+changes marked not sent yet or fork only above. The rest of the original split (the badges, the
+cross-format markers, the series gap report, the scheduler cycle guard) follows in small pieces.
 
 ## How it is maintained
 
