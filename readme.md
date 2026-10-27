@@ -53,7 +53,7 @@ The Origin column says who wrote a change and where it stands upstream: **merged
 
 | Change | Origin |
 |---|---|
-| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Open upstream: [#1590](https://github.com/calibrain/shelfmark/pull/1590) |
+| A Soulseek batch that slskd refuses with a 500 (the peer did not answer its queue request within 5 seconds) is tried once more, and the failure message carries what slskd said instead of just the status | This fork. Merged upstream: [#1590](https://github.com/calibrain/shelfmark/pull/1590) |
 | A Soulseek uploader's anti-leech bot that blocks downloads until a word is typed in a private message gets that word as a reply, at most once per user every 12 hours, logged on each reply (`SLSKD_CHAT_AUTOPROVE`, on by default) | Adapted from [Nezreka/SoulSync@445473b](https://github.com/Nezreka/SoulSync/commit/445473b) by [@Nezreka](https://github.com/Nezreka). Open upstream as a draft, [#1591](https://github.com/calibrain/shelfmark/pull/1591), with the setting off by default there |
 | AudiobookBay pages that wrap each post in base64 are decoded, and a page that parses to nothing is logged instead of looking like an empty result | Ported from [DrNgo/shelfmark-fork@7fb5f27](https://github.com/DrNgo/shelfmark-fork/commit/7fb5f27) by [@DrNgo](https://github.com/DrNgo). Not sent upstream yet; I'm asking him first whether he wants to send it himself |
 | Dead torrents nothing is watching are removed with their partial data: stalled or stuck fetching metadata, idle for `STALE_TORRENT_HOURS` (6 by default, 3 to 72, 0 turns it off, qBittorrent only), and owned by no running download. Only torrents this instance added are ever touched: it keeps a ledger of the hash of every torrent it adds, so a torrent added before the ledger, or one something else put in the same category, is never removed | This fork. Not sent yet (an upstream candidate) |
@@ -87,7 +87,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes
-there rather than living in this fork. Eighty-seven have merged so far.
+there rather than living in this fork. Ninety-four have merged so far.
 
 Features, refactors and auth:
 
@@ -260,7 +260,7 @@ Merged on October 23, the Hardcover series and a round of security and docs fixe
 - [#1566](https://github.com/calibrain/shelfmark/pull/1566) bring the plugin guides in line with the current code
 - [#1567](https://github.com/calibrain/shelfmark/pull/1567) small fixes from a check of the docs against the code
 
-Merged on October 24 to 26, since then:
+Merged on October 24 to 27, since then:
 
 - [#1568](https://github.com/calibrain/shelfmark/pull/1568) report a stopped download coordinator in `/api/health`
 - [#1569](https://github.com/calibrain/shelfmark/pull/1569) keep the scheduler alive on an unreadable interval, share one history connection
@@ -276,17 +276,24 @@ Merged on October 24 to 26, since then:
 - [#1587](https://github.com/calibrain/shelfmark/pull/1587) match a shelf title against the full title when the search title is only the
   series
 - [#1588](https://github.com/calibrain/shelfmark/pull/1588) say what applies on a user's own notification routes page
+- [#1570](https://github.com/calibrain/shelfmark/pull/1570) map the qBittorrent 5 stopped states and forcedMetaDL
+- [#1578](https://github.com/calibrain/shelfmark/pull/1578) one module for taking credentials and links out of text
+- [#1590](https://github.com/calibrain/shelfmark/pull/1590) try a Soulseek batch enqueue once more when slskd answers 500
+- [#1593](https://github.com/calibrain/shelfmark/pull/1593) keep credentials out of a source-unavailable message
+- [#1597](https://github.com/calibrain/shelfmark/pull/1597) take the retry download URL from the release cache only
+- [#1598](https://github.com/calibrain/shelfmark/pull/1598) apply the record policy to a provider named alongside a source
+- [#1603](https://github.com/calibrain/shelfmark/pull/1603) catch joserfc's InvalidClaimError so the OIDC issuer guidance shows
 
 Open:
 
-- [#1570](https://github.com/calibrain/shelfmark/pull/1570) map the qBittorrent 5 stopped states and forcedMetaDL
-- [#1578](https://github.com/calibrain/shelfmark/pull/1578) one module for taking credentials and links out of text
 - [#1579](https://github.com/calibrain/shelfmark/pull/1579) let a book be requested alongside downloads
-- [#1590](https://github.com/calibrain/shelfmark/pull/1590) try a Soulseek batch enqueue once more when slskd answers 500
+- [#1589](https://github.com/calibrain/shelfmark/pull/1589) read the featured series from a search result
 - [#1591](https://github.com/calibrain/shelfmark/pull/1591) answer anti-leech chat challenges from Soulseek uploaders, a draft with the
   setting off by default
 - [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
   [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588))
+- [#1594](https://github.com/calibrain/shelfmark/pull/1594) move the onboarding routes into their own module
+- [#1595](https://github.com/calibrain/shelfmark/pull/1595) move the settings routes into their own module
 
 The Hardcover sync and the Audiobookshelf check, which this fork carried for a month, went
 upstream in those five parts. What stays here is what upstream has not been asked for yet: the
