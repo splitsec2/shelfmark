@@ -13,8 +13,8 @@ upstream took things: the Hardcover sync, the Audiobookshelf check and the autom
 are all upstream now, and this page lists only what is still different.
 
 The Origin column says who wrote a change and where it stands upstream: **open** (the PR is
-linked), **not sent yet** (an upstream candidate) or **fork only** (outside upstream's scope, so
-it is never sent). Changes carried from someone else's work credit them.
+linked) or **not sent yet** (an upstream candidate). The one **fork only** change is the image
+build, which is not meant for upstream. Changes carried from someone else's work credit them.
 
 ### Hardcover
 
@@ -24,7 +24,7 @@ it is never sent). Changes carried from someone else's work credit them.
 | Lists and shelves on the search page follow the signed-in user: a user who connected their own Hardcover token gets their own lists, "add to list" and read-status actions, and a user with no account of their own gets none. Upstream shares the instance's account with everyone | This fork. Not sent yet (an upstream candidate, after [#1592](https://github.com/calibrain/shelfmark/pull/1592)) |
 | Series gaps (admin): every series in your libraries against the volumes Hardcover lists, marked owned, requested or missing, with one column for ebooks and one for audiobooks. A series with ebooks and no audiobooks can still have its audiobooks requested, and Hardcover's duplicate or mis-credited listings of a series are passed over for the real one | This fork. Not sent yet (an upstream candidate) |
 | The sync scheduler reports its health: `/api/stats` carries the age of the last cycle, its errors and a healthy flag, and `/api/health` says whether it is running. One cycle is bounded, so a stuck call is given up on and the next cycle can run | This fork. Not sent yet (an upstream candidate) |
-| A user's own Hardcover token (and any other per-user secret) is masked in settings payloads and shown to its owner only on request | This fork. Fork only |
+| A user's own Hardcover token (and any other per-user secret) is masked in settings payloads and shown to its owner only on request | This fork. Not sent yet (an upstream candidate) |
 
 ### Library check
 
@@ -48,15 +48,15 @@ it is never sent). Changes carried from someone else's work credit them.
 
 | Change | Origin |
 |---|---|
-| An admin can also reopen a request whose download failed or was cancelled. The release that failed is remembered on the request so the next search skips it, and the same happens when a failed download reopens its request by itself | This fork. Fork only |
-| A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Fork only |
-| A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Fork only |
-| The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Fork only |
+| An admin can also reopen a request whose download failed or was cancelled. The release that failed is remembered on the request so the next search skips it, and the same happens when a failed download reopens its request by itself | This fork. Not sent yet (an upstream candidate) |
+| A Rejected view next to History lists every rejected request, including ones cleared from the list, with Reopen on each. Cards can be hidden from it, with a "Show hidden" toggle so nothing gets lost | This fork. Not sent yet (an upstream candidate) |
+| A rejected card says who declined it and when. Admin actions taken by scripts carry an `[auto]` note, so they can be told apart from a person's | This fork. Not sent yet (an upstream candidate) |
+| The format is a coloured pill on every card: Audiobook or Ebook on a request, the file format (EPUB, M4B, MP3) on a download, violet for audio and orange for ebooks. The requester is named once instead of twice | This fork. Not sent yet (an upstream candidate) |
 | Clear Completed also clears finished requests that never had a download, and shows on the Requests tab | This fork. Not sent upstream; a maintainer ask comes first (#1438, which it builds on, has merged) |
-| A download that picks up work already under way (a torrent the client had, files already on disk, slskd transfers it rejoins) shows a Reattached pill | This fork. Fork only for the pill; the flag on the task is an upstream candidate, not sent yet |
-| Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Fork only |
-| The Requests view says what is automatic and what is for a person: a decision the automation made reads "Declined automatically" or "Automatic: ..." instead of naming the admin account it acted through, "Needs Review" is "No Match Yet" with a line saying the search repeats on every sync and what the admin can do, and a request reopened after a failed download sits under "Retrying Automatically". Failure reasons use plain words | This fork. Fork only |
-| Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Not sent yet (an upstream candidate now that the quick retry it describes has merged in [#1535](https://github.com/calibrain/shelfmark/pull/1535)) |
+| A download that picks up work already under way (a torrent the client had, files already on disk, slskd transfers it rejoins) shows a Reattached pill | This fork. Not sent yet (an upstream candidate; the flag on the task goes with the pill) |
+| Finished cards say how long a download took and how long ago it ended, as text at the end of the existing line ("took 4m · 2h ago", "5m ago" on a failure, "delivered 3h ago" on a request) | This fork. Not sent yet (an upstream candidate) |
+| The Requests view says what is automatic and what is for a person: a decision the automation made reads "Declined automatically" or "Automatic: ..." instead of naming the admin account it acted through, "Needs Review" is "No Match Yet" with a line saying the search repeats on every sync and what the admin can do, and a request reopened after a failed download sits under "Retrying Automatically". Failure reasons use plain words | This fork. Not sent yet (an upstream candidate) |
+| Failed and cancelled cards say in plain words what happened and what comes next (another copy in about N minutes, or Retry), instead of the log line | This fork. Open upstream: [#1617](https://github.com/calibrain/shelfmark/pull/1617) |
 
 ### Build
 
@@ -100,12 +100,13 @@ is on GitHub, and these are the clusters:
 Open:
 
 - [#1579](https://github.com/calibrain/shelfmark/pull/1579) let a book be requested alongside downloads
+- [#1617](https://github.com/calibrain/shelfmark/pull/1617) say in plain words what a failed download means and what happens next
 - [#1591](https://github.com/calibrain/shelfmark/pull/1591) answer anti-leech chat challenges from Soulseek uploaders, off by default
 - [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
   [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588))
 
-What stays here is what upstream has not been asked for yet: the changes marked not sent yet or
-fork only above. The badges, the cross-format markers, the series gap report and the scheduler
+What stays here is what upstream has not been asked for yet: the changes marked not sent yet above, and
+the image build. The badges, the cross-format markers, the series gap report and the scheduler
 cycle guard are next, in small pieces.
 
 ## How it is maintained
