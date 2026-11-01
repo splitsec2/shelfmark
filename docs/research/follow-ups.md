@@ -1,9 +1,10 @@
-# Base image follow-ups: drafts, none filed
+# Base image follow-ups
 
-Drafts from the [base image report](https://github.com/splitsec2/shelfmark/blob/8509a385ddb6ef0bc5d5c03bc27b985daa219297/docs/research/2026-11-01-base-image-report.md), for me to decide what to file on calibrain/shelfmark. Numbers are from the real builds in that report, amd64 and arm64.
+Follow-ups from the [base image report](https://github.com/splitsec2/shelfmark/blob/8509a385ddb6ef0bc5d5c03bc27b985daa219297/docs/research/2026-11-01-base-image-report.md), filed on calibrain/shelfmark on 2026-11-01 as written below. Numbers are from the real builds in that report, amd64 and arm64.
 
 ## a. Issue: move supervisor to `uv.lock` and use libtk/libtcl directly
 
+**Filed:** [#1633](https://github.com/calibrain/shelfmark/issues/1633)
 **Type:** issue
 **Labels:** enhancement, docker, dependencies
 **Assignee:** splitsec2
@@ -37,6 +38,7 @@ Tested on both arches as uid 1000: Tor through supervisor, a real WireGuard tunn
 
 ## b. Issue: optional seccomp hardening profile for the browser
 
+**Filed:** [#1634](https://github.com/calibrain/shelfmark/issues/1634)
 **Type:** issue
 **Labels:** enhancement, documentation, docker
 **Assignee:** splitsec2
@@ -82,6 +84,7 @@ Not tested: Podman, Kubernetes, or hosts that restrict unprivileged user namespa
 
 ## c. Issue: scheduled check for a newer Debian chromium
 
+**Filed:** [#1635](https://github.com/calibrain/shelfmark/issues/1635)
 **Type:** issue
 **Labels:** enhancement, github_actions, docker, dependencies
 **Assignee:** splitsec2
@@ -100,16 +103,16 @@ Proposed, as a workflow on a daily or weekly schedule:
 
 It should only open an issue and not a bump PR. #1105 shows a new Debian Chromium can break the CDP bypasser, so a person has to test each bump. Actions pinned by SHA, with `issues: write` as the only permission.
 
-Not built or tested yet.
+Not built or tested yet. Renovate's `deb` datasource is a candidate implementation, pending a test against security.debian.org.
 
 What each bump still has to check is the click path. .73 clears DDoS-Guard on Anna's Archive from a residential network, but those challenges all cleared on the auto-wait step, so `_bypass_method_cdp_click` (and `_bypass_method_cdp_gui_click`, which runs before it) wasn't exercised. So the open Chromium regression question is that path, and no longer solving in general.
 
 ## d. Discussion: support policy for native Tor and WireGuard vs gluetun-style sidecars
 
+**Filed:** [discussion #1636](https://github.com/calibrain/shelfmark/discussions/1636)
 **Type:** discussion, not an issue
 **Category:** Ideas
 **Labels:** none
-**Assignee:** splitsec2
 
 **Title:** Should native Tor and WireGuard stay in the image, or should we point people at a sidecar?
 
