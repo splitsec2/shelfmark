@@ -104,6 +104,7 @@ Open:
 - [#1591](https://github.com/calibrain/shelfmark/pull/1591) answer anti-leech chat challenges from Soulseek uploaders, off by default
 - [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
   [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588))
+- [#1631](https://github.com/calibrain/shelfmark/pull/1631) drop ffmpeg from the default image and install it on demand in Debug mode
 
 What stays here is what upstream has not been asked for yet: the changes marked not sent yet above, and
 the image build. The badges, the cross-format markers, the series gap report and the scheduler
