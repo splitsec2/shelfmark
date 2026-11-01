@@ -606,7 +606,7 @@ Added the same day, before the real builds, and superseded by "Real builds" wher
 | Tor | Debian 0.4.9.15 | source build 0.4.9.15 | no reason to: same version, 3 Low findings |
 | supervisor | Debian 4.2.5 | PyPI 4.3.0 in a venv | **works** |
 | Tk | `python3-tk` (pulls Debian Python 3.13) | `python-3.14-tk`, Tk 9.1 | **works** with `libtk8.6` and `libtcl8.6` directly |
-| RAR | `unrar-free` | `7zip` 26.05 with RAR | **needs `non-free`**, see below |
+| RAR | `unrar-free` | `7zip` 26.05 with RAR | needs `non-free`, measured only and not proposed, see below |
 | ffmpeg | 7.1.5 | 9.0.2 | removed instead |
 | WireGuard | `wireguard-tools` with `wg-quick` | no `wg-quick` | stays |
 | Frontend build | `node:24-alpine` | Wolfi `nodejs-24` | no gain |
@@ -621,14 +621,15 @@ Same 51 samples, same test. RAR5 and RAR3 columns exclude password-protected sam
 | `unrar-free` (today) | Debian `main` | 35 | 18/20 | 8/12 | n/a | yes; 8 Low/Medium via libarchive |
 | `7zip` alone | Debian `main` | 26 | 10/20 | 8/12 | **9 samples** | yes |
 | `bsdtar` (libarchive-tools) | Debian `main` | 26 | 10/20 | 8/12 | **9 samples** | yes |
-| **`unrar`** | Debian **`non-free`** | **40** | 18/20 | 9/12 | none | **yes; 1 finding, severity unknown** |
-| `7zip` + `7zip-rar` | Debian **`non-free`** | 40 | 18/20 | 9/12 | none | yes; 8+ findings, 2 High |
+| `unrar` | Debian `non-free` | 40 | 18/20 | 9/12 | none | yes; 1 finding, severity unknown |
+| `7zip` + `7zip-rar` | Debian `non-free` | 40 | 18/20 | 9/12 | none | yes; 8+ findings, 2 High |
 | Upstream `7zz` | 7-zip.org binary (tested 23.01) | 40 | not separated | not separated | none | **no**, `Results []` |
+
+The non-free rows were measured for completeness only; adding a non-free component is not proposed.
 
 - Debian's `7zip` has its RAR codec split out into `7zip-rar`, which is why it fails RAR5 samples.
 - **Wolfi's 7zip can't be reused to get the scan.** Trivy sees it only through Wolfi's package database, so outside Wolfi it is the same invisible binary as upstream.
 - **A hand-written CycloneDX file** next to `7zz` produced no results in a quick test (both `pkg:generic` and `pkg:deb` PURLs). I stopped there: making it match would mean claiming an upstream binary is a Debian package, which is a cosmetic result.
-- **Best option if RAR matters:** Debian's `unrar`. No code change, since `rarfile` already prefers `unrar`. It removes `unrar-free` and libarchive, and Trivy still scans it. The catch is that it needs the `non-free` component, and its copyright file says "This software is non-free" and "License: freeware". That is calibrain's call. It also doesn't belong in the ffmpeg PR.
 
 ### How far Debian gets, cumulatively
 
@@ -637,7 +638,7 @@ Same 51 samples, same test. RAR5 and RAR3 columns exclude password-protected sam
 | Published | 1159 | 297 | 1 | 413 | 448 MB | pass |
 | Remove ffmpeg | 753 | 148 | 1 | 320 | 375 MB | pass |
 | PyPI supervisor, direct libtk | 656 | 122 | 1 | 299 | not measured | pass |
-| `unrar` from non-free | 649 | 122 | 1 | 298 | not measured | RAR test only |
+| `unrar` from non-free (measured, not proposed) | 649 | 122 | 1 | 298 | not measured | RAR test only |
 | Chrome for Testing .80, with its `deb.deps` | 629 | 84 | 1 | 278 | 390 MB | pass |
 | Drop GTK and the second libcurl | **558** | **79** | 1 | 238 | **378 MB** | pass |
 
