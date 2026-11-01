@@ -14,6 +14,7 @@ Every result here is `[verified]` from a real `docker build` on a GitHub-hosted 
 
 - **Run 1:** 41335522683. main, ffmpeg patch, #1616 as written. 6 jobs.
 - **Run 2:** 41339436116. main, ffmpeg patch, D1, D2, rebased Wolfi. 10 jobs, all from main at `0a7e114`.
+- **Runs 3 and 4:** 41349295350 and 41352196408. main and the fixed ffmpeg patch, then the fixed patch again with a corrected black-hole case. Both architectures, same `0a7e114`. See "ffmpeg patch: what the first version missed".
 - **Harness:** the test script, helpers and variant patches are in [`testkit/`](testkit/), copied as they ran. It ran from a temporary orphan branch on `splitsec2/shelfmark`, so none of Shelfmark's workflows ran. Actions pinned by SHA, scanners pinned by version or digest, no secrets, images never pushed, only logs and JSON uploaded. No job needed an infrastructure re-run.
 
 ### The variants
@@ -95,6 +96,8 @@ Latest status from `advisories.cgr.dev`:
 
 ### ffmpeg patch gaps
 
+These are for the first version of the patch, from runs 1 and 2, which installed before startup. The startup costs below no longer apply, and the next section replaces "no gap found".
+
 | Case | Result, patch and D1/D2 | Evidence |
 |---|---|---|
 | Debug off, startup added | **None** | `/api/health` 3-4 s, main 3 s |
@@ -108,7 +111,28 @@ Latest status from `advisories.cgr.dev`:
 | apt blocked (closed proxy) | pass | `Could not install ffmpeg` logged, bypass works, no mp4, about 7 s added |
 | `--network none`, Debug on | pass | Running, health 200 inside after 60 s; no hang |
 
-The root-phase import of `shelfmark.config.env` leaves nothing root-owned. **No gap found.**
+The root-phase import of `shelfmark.config.env` leaves nothing root-owned. These runs found no gap, and that turned out to be wrong.
+
+### ffmpeg patch: what the first version missed
+
+CI on #1631 failed `e2e (dns-blocked)`. With `DEBUG=true`, the entrypoint was still in `apt-get update` when the 120 s health window ended, and the app starts after that step. My blocked-apt and `--network none` cases both failed fast, so neither showed it. I never found out why apt got no answer under that profile.
+
+The fix runs the install in the background, downloads first and installs from disk afterwards, under a 120 s `timeout` for each step, with `DEBIAN_FRONTEND=noninteractive`. It logs when it starts, succeeds, times out or fails.
+
+| Case, fixed patch, amd64 and arm64 | Result | Run |
+|---|---|---|
+| `e2e` `dns-blocked` and `baseline` profiles | pass | 3, 4 |
+| Debug only in config | `/api/health` in 3-4 s, same as main. ffmpeg ready 6-8 s later, real mp4 | 3, 4 |
+| Debug from env | Health in 9-10 s, same as main | 3, 4 |
+| **Proxy on a dropped address: apt gets no TCP reply** | Health in 9-10 s. Bypass during the install passes, warns, no mp4. apt gives up by itself: `Could not install ffmpeg (exit 100)`, under a minute. Nothing left running, `dpkg --audit` clean | 4 |
+| **DNS server on a dropped address** | Health in 9-10 s. `Timed out installing ffmpeg after 120s`. Nothing left running, `dpkg --audit` clean | 3, 4 |
+| Container restarted while dpkg was running | Next start finishes the install, `dpkg --audit` clean, real mp4 | 3, 4 |
+| First bypass right after health | Passes. Recorded when the install won the race, unrecorded with the warning when it didn't (arm64, run 4) | 3, 4 |
+| Blocked apt (closed proxy), `--network none`, non-root, fresh and existing volumes, Tor, WireGuard | Same results as before | 3, 4 |
+
+- In run 3 the `blackhole_mirror` case didn't test what it claimed. I pinned the mirror names to a dropped address in `/etc/hosts`, and apt still reached a mirror and installed. I don't know how. Run 4 uses the proxy instead.
+- `blackhole_mirror.result` reports FAIL in run 4 because that check expects the timeout message, and apt gave up first. The behaviour is fine and the check was too narrow. See the test kit's README.
+- D1, D2 and rebased Wolfi were not rebuilt. D1 and D2 use the first version of this code until they're regenerated.
 
 ### D1 and D2 runtime checks
 
@@ -133,7 +157,9 @@ With `--no-sandbox`, renderers share the browser's namespaces and have the same 
 
 ### Cloudflare demo page
 
-A real challenge was served on `scrapingcourse.com/cloudflare-challenge`. **No variant solved it, including main, with or without the sandbox.** All 10 jobs: 18 attempts, "same challenge detected 4 times", about 6 minutes, then the budget ran out. Identical behaviour gives no sign that Chrome for Testing is worse, but no solve means it doesn't show it's as good, either. This is from Azure IPs, and #1614 saw the same non-solve from a different network.
+A real challenge was served on `scrapingcourse.com/cloudflare-challenge`. **From datacenter IPs, no variant solved it, including main, with or without the sandbox.** All 10 jobs: 18 attempts, "same challenge detected 4 times", about 6 minutes, then the budget ran out. Identical behaviour gives no sign that Chrome for Testing is worse, but no solve means it doesn't show it's as good, either. This is from Azure IPs, and #1614 saw the same non-solve from a different network.
+
+**.73 on a real network** `[verified from my instance's logs]`: five DDoS-Guard challenges on Anna's Archive search auto-cleared on .73 from a residential network over about 37 hours on Oct 31 and Nov 1, each 25-29 s from the 403 to clearing, with no failures in that window. All five cleared on the auto-wait step, so the click path wasn't exercised (`_bypass_method_cdp_gui_click` runs first, then `_bypass_method_cdp_click`). The demo page's non-solve stays a datacenter-IP result. Whether the click path works on .73 is still open.
 
 ### Pins and browser-bump burden
 
@@ -176,7 +202,7 @@ Read from each variant's Dockerfile and `pyproject.toml` on 2026-11-01. No varia
 
 ### Recommendation: D1, on Debian Chromium
 
-1. **Open the ffmpeg PR.** Every gap tested clean on both architectures. It takes out 406 findings, 149 High and 78 MB.
+1. **Open the ffmpeg PR.** CI caught a startup bug in my first version, which is fixed and re-tested on both architectures. It takes out 406 findings, 149 High and 78 MB.
 2. **Move supervisor into `uv.lock` and use `libtk`/`libtcl` directly.** That drops Debian's Python 3.13 family. Result: 655 findings and the same 3 manual pins as today. Tor, WireGuard and `Tk()` all pass.
 3. **Stay on Debian's Chromium and add a scheduled check** that flags when Debian publishes a newer chromium, because nothing does today and the pin goes stale silently. The check isn't built or tested. `[unverified]`
 4. **#1616 can't merge unchanged.** With its blockers fixed Wolfi works, except `Tk()`, and it ships fewer known-unfixed CVEs (18 vs 339). It also costs 10 hand-kept pins against 3, `apk` packages that float with no snapshot to roll back to, and a browser no scanner can see. That needs a named owner.
@@ -187,7 +213,7 @@ Read from each variant's Dockerfile and `pyproject.toml` on 2026-11-01. No varia
 - It adds two hashes per bump, on top of the version.
 - It changes the browser under bypass code that has already proven sensitive to Chromium versions (#1105, #1614).
 
-The cost of this decision is that the image stays on .73 until Debian publishes a newer build. The 21 CVEs on .73 are all fixed in .79, and Chrome runs with `--no-sandbox` on every variant, so that exposure stays open until then.
+On a residential network .73 is clearing real DDoS-Guard challenges on the auto-wait step, but the click path on .73 is untested, see "Cloudflare demo page". The cost of this decision is that the image stays on .73 until Debian publishes a newer build. The 21 CVEs on .73 are all fixed in .79, and Chrome runs with `--no-sandbox` on every variant, so that exposure stays open until then.
 
 ### Conclusion (superseded by the recommendation above)
 
@@ -204,7 +230,7 @@ Kept as the record of the earlier call. It preferred Chrome for Testing, which h
 
 ### What I didn't run, and why
 
-- **A solved Cloudflare challenge.** None succeeded on any variant; that's a result, not a gap in running it. Real book-source sites weren't tested, on purpose.
+- **A solved Cloudflare challenge in CI.** None succeeded on any variant from datacenter IPs; that's a result, not a gap in running it. The click path on .73 is untested anywhere. Real book-source sites weren't tested, on purpose.
 - **Dependabot on `wolfi-base:latest@sha256` and the new `uv.lock` entry.** It only acts on its own schedule on the default branch.
 - **`--ignore-unfixed` as a separate flag.** Counted from `FixedVersion` in the same JSON.
 - **A real VPN provider or real-world Tor load.** The WireGuard peer was the runner itself, and the kill switch was checked with one `curl` over IPv4.
@@ -707,7 +733,7 @@ The PR replay ran the package lists from `pr1616:Dockerfile` lines 87, 110-140 a
 
 ## What I could not verify (at the time)
 
-Written before the real builds. Items 1 to 3, 5, 6 and 8 are now answered in "Real builds". Item 4 remains open: no variant solved the challenge.
+Written before the real builds. Items 1 to 3, 5, 6 and 8 are now answered in "Real builds". Item 4 is partly answered: .73 clears DDoS-Guard on the auto-wait step from a residential network, and the click path remains open.
 
 1. **Any real `docker build`, of either branch.** The PR's Dockerfile has not been built here, and its real layer sizes and compressed image size are unknown.
 2. **`entrypoint.sh` end to end on the PR**, including the `gosu` drop and BusyBox `timeout`. The namespace can't switch uid; the smoke test calls Python directly.

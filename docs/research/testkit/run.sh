@@ -60,6 +60,18 @@ cf_case() { # label
 }
 
 result_line() { grep -m1 '^RESULT' "$L/$1.log" | cut -c1-170; }
+# The install runs in the background now, so a check that expects a recording waits for it.
+wait_ffmpeg() { # label
+    local i
+    for ((i = 0; i < 300; i += 1)); do
+        docker exec app ffmpeg -version >/dev/null 2>&1 && { rec "$1.install" INFO "ffmpeg_runs after_secs=$i"; return 0; }
+        docker logs app 2>&1 | grep -qE 'Timed out installing ffmpeg|Could not install ffmpeg' && { rec "$1.install" INFO "gave_up after_secs=$i"; return 1; }
+        sleep 1
+    done
+    rec "$1.install" INFO "no_result_after_secs=$i"
+    return 1
+}
+
 mp4_size() { docker exec app sh -c 'ls -l /var/log/shelfmark/recording/*.mp4 2>/dev/null | tail -1' | awk '{print $5+0}'; }
 
 # ---------- host facts
@@ -163,6 +175,7 @@ rec rar INFO "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print
 # ---------- 6 Debug by env, root start
 start_app t:shelfmark -e DEBUG=true
 h=$(wait_health 300) && rec debug_env.health PASS "secs=$h" || rec debug_env.health FAIL "$h"
+wait_ffmpeg debug_env
 rc=$(smoke_exec debug_env.smoke)
 rec debug_env.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc $(result_line debug_env.smoke)"
 rec debug_env.recording INFO "mp4_bytes=$(mp4_size) ffmpeg=$(docker exec app sh -c 'command -v ffmpeg || echo none')"
@@ -178,6 +191,7 @@ echo '{"DEBUG": true}' >"$cfg/plugins/advanced.json"
 chmod -R a+rwX "$cfg"
 start_app t:shelfmark -v "$cfg:/config"
 h=$(wait_health 300) && rec debug_cfg.health PASS "secs=$h" || rec debug_cfg.health FAIL "$h"
+wait_ffmpeg debug_cfg
 rc=$(smoke_exec debug_cfg.smoke)
 rec debug_cfg.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc $(result_line debug_cfg.smoke)"
 rec debug_cfg.recording INFO "mp4_bytes=$(mp4_size) ffmpeg=$(docker exec app sh -c 'command -v ffmpeg || echo none')"
@@ -219,6 +233,80 @@ if [ "$V" != wolfi ]; then
     stop_app
 fi
 
+# ---------- background install: first bypass, a mirror that never answers, a restart mid-install
+if [ "$V" = ffmpeg-optional ]; then
+    # First bypass straight after health, racing the install; then one after it finishes.
+    cfg2=$(mktemp -d)
+    mkdir -p "$cfg2/plugins"
+    echo '{"DEBUG": true}' >"$cfg2/plugins/advanced.json"
+    chmod -R a+rwX "$cfg2"
+    start_app t:shelfmark -v "$cfg2:/config"
+    h=$(wait_health 300) && rec first_bypass.health PASS "secs=$h" || rec first_bypass.health FAIL "$h"
+    rc=$(smoke_exec first_bypass.during)
+    rec first_bypass.during "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size) warned=$(grep -c 'ffmpeg is not installed' "$L/first_bypass.during.log")"
+    wait_ffmpeg first_bypass
+    rc=$(smoke_exec first_bypass.after)
+    rec first_bypass.after "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size)"
+    logs_app first_bypass
+    rec first_bypass.logged INFO "started=$(grep -c 'installing ffmpeg in the background' "$L/first_bypass.docker.log") installed=$(grep -c 'ffmpeg installed' "$L/first_bypass.docker.log")"
+    stop_app
+
+    # State of apt and dpkg after the job has ended.
+    apt_state() { # label
+        rec "$1.apt_state" "$([ "$(docker exec app sh -c 'pgrep -c "apt|dpkg|http" || true')" = 0 ] && docker exec app dpkg --configure -a >/dev/null 2>&1 && [ -z "$(docker exec app dpkg --audit 2>&1)" ] && echo PASS || echo FAIL)" "procs=$(docker exec app sh -c 'pgrep -c "apt|dpkg|http" || true') audit_lines=$(docker exec app dpkg --audit 2>&1 | wc -l) ffmpeg=$(docker exec app sh -c 'command -v ffmpeg || echo none')"
+    }
+
+    # Black-holed, not refused: packets to this address are dropped with no reply.
+    BH=198.51.100.1
+    sudo iptables -I DOCKER-USER 1 -d "$BH" -j DROP
+
+    t0=$SECONDS
+    # Through a proxy on the dropped address, because /etc/hosts doesn't hold apt back:
+    # run 3 pinned the mirror names there and apt still reached a mirror and installed.
+    aptbh=$(mktemp)
+    echo "Acquire::http::Proxy \"http://$BH:3128\"; Acquire::https::Proxy \"http://$BH:3128\";" >"$aptbh"
+    chmod a+r "$aptbh"
+    start_app t:shelfmark -e DEBUG=true -v "$aptbh:/etc/apt/apt.conf.d/99blackhole:ro"
+    h=$(wait_health 110) && rec blackhole_mirror.health PASS "secs=$h" || rec blackhole_mirror.health FAIL "$h"
+    rec blackhole_mirror.proof INFO "curl=$(docker exec app curl -s -o /dev/null --max-time 8 -x "http://$BH:3128" -w '%{http_code}/%{exitcode}' http://deb.debian.org/ 2>&1) want_000/28 still_installing=$(docker logs app 2>&1 | grep -cE 'Timed out installing|Could not install')"
+    rc=$(smoke_exec blackhole_mirror.smoke)
+    rec blackhole_mirror.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size) warned=$(grep -c 'ffmpeg is not installed' "$L/blackhole_mirror.smoke.log")"
+    wait_ffmpeg blackhole_mirror
+    logs_app blackhole_mirror
+    rec blackhole_mirror.result "$(grep -q 'Timed out installing ffmpeg after 120s' "$L/blackhole_mirror.docker.log" && echo PASS || echo FAIL)" "elapsed=$((SECONDS - t0)) $(grep -E 'Timed out installing|Could not install|ffmpeg installed' "$L/blackhole_mirror.docker.log" | tail -1 | cut -c1-110)"
+    apt_state blackhole_mirror
+    rc=$(smoke_exec blackhole_mirror.after)
+    rec blackhole_mirror.after "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc"
+    stop_app
+
+    t0=$SECONDS
+    start_app t:shelfmark -e DEBUG=true --dns "$BH"
+    h=$(wait_health 110) && rec blackhole_dns.health PASS "secs=$h" || rec blackhole_dns.health FAIL "$h"
+    rec blackhole_dns.proof INFO "curl=$(docker exec app curl -s -o /dev/null --max-time 15 -w '%{http_code}/%{exitcode}' http://deb.debian.org/ 2>&1)"
+    wait_ffmpeg blackhole_dns
+    logs_app blackhole_dns
+    rec blackhole_dns.result INFO "elapsed=$((SECONDS - t0)) $(grep -E 'Timed out installing|Could not install|ffmpeg installed' "$L/blackhole_dns.docker.log" | tail -1 | cut -c1-110)"
+    apt_state blackhole_dns
+    stop_app
+    sudo iptables -D DOCKER-USER -d "$BH" -j DROP
+
+    # Container restarted while dpkg is working, then started again on the same filesystem.
+    start_app t:shelfmark -e DEBUG=true
+    hit=no
+    for _ in $(seq 1 1200); do
+        docker logs app 2>&1 | grep -qE '^(Unpacking|Setting up) ' && { hit=yes; break; }
+        sleep 0.1
+    done
+    docker restart -t 0 app >/dev/null
+    h=$(wait_health 300) && rec restart_mid_install.health PASS "secs=$h caught_dpkg=$hit" || rec restart_mid_install.health FAIL "$h caught_dpkg=$hit"
+    wait_ffmpeg restart_mid_install
+    logs_app restart_mid_install
+    apt_state restart_mid_install
+    rc=$(smoke_exec restart_mid_install.smoke)
+    rec restart_mid_install.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size)"
+    stop_app
+fi
+
 # ---------- ownership: Debug only in config, fresh volume and existing uid-1000 volume
 own_check() { # label
     local label=$1
@@ -233,6 +321,7 @@ docker volume create smfresh >/dev/null
 docker run --rm --user 1000:1000 -v smfresh:/config --entrypoint sh t:shelfmark -c 'mkdir -p /config/plugins && echo "{\"DEBUG\": true}" >/config/plugins/advanced.json' >"$L/fresh-seed.txt" 2>&1
 start_app t:shelfmark -v smfresh:/config
 h=$(wait_health 300) && rec fresh_volume.health PASS "secs=$h" || rec fresh_volume.health FAIL "$h"
+wait_ffmpeg fresh_volume
 rc=$(smoke_exec fresh_volume.smoke)
 rec fresh_volume.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size)"
 own_check fresh_volume
@@ -248,6 +337,7 @@ sudo python3 -c 'import json,sys;p=sys.argv[1]+"/plugins/advanced.json";d=json.l
 sudo chown 1000:1000 "$exist/plugins/advanced.json"
 start_app t:shelfmark -v "$exist:/config"
 h=$(wait_health 300) && rec existing_volume.health PASS "debug_config_only secs=$h" || rec existing_volume.health FAIL "$h"
+wait_ffmpeg existing_volume
 rc=$(smoke_exec existing_volume.smoke)
 rec existing_volume.smoke "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc mp4=$(mp4_size)"
 own_check existing_volume
@@ -375,6 +465,19 @@ rec sandbox.control_flag_on.chrome INFO "$(cut -c1-330 "$L/sbx.control.json" | t
 rec sandbox.host_userns_restrict INFO "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null)"
 sbx_case default_host_default
 sbx_case allowns_host_default --security-opt "seccomp=$WS/allow-ns.json"
+
+# ---------- the e2e profile that caught the blocking install on the PR, and the baseline
+if command -v uv >/dev/null 2>&1; then
+    (cd "$WS/src" && uv sync --locked --extra browser >"$L/e2e-sync.log" 2>&1)
+    for profile in dns-blocked baseline; do
+        (cd "$WS/src" && tests/e2e/platform/run-e2e.sh "env/$profile.env") >"$L/e2e-$profile.log" 2>&1
+        rc=$?
+        rec "e2e.$profile" "$([ "$rc" = 0 ] && echo PASS || echo FAIL)" "rc=$rc $(grep -E ' passed| failed|never became healthy' "$L/e2e-$profile.log" | tail -1 | cut -c1-110)"
+        cp "$WS/src/tests/e2e/platform/.state/shelfmark.$profile.log" "$L/e2e-$profile.shelfmark.log" 2>/dev/null
+    done
+else
+    rec e2e NOTRUN "no uv"
+fi
 
 rec finished PASS "elapsed=$SECONDS"
 exit 0

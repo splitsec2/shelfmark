@@ -11,32 +11,88 @@ index 7d68336..baaf4c1 100644
      chromium=${CHROMIUM_VERSION} \
      chromium-common=${CHROMIUM_VERSION} \
      # For tkinter (pyautogui)
+diff --git a/docs/troubleshooting.md b/docs/troubleshooting.md
+index d15a962..f987102 100644
+--- a/docs/troubleshooting.md
++++ b/docs/troubleshooting.md
+@@ -12,6 +12,8 @@ Shelfmark writes its log to the container output, so `docker logs shelfmark` sho
+ 
+ Set `DEBUG=true` on the container and restart it. A **DEBUG** button then appears in the interface. It generates a zip with logs, configuration and environment details, with sensitive values redacted. Have a look through it before you post it publicly, then attach it when you open an issue.
+ 
++The full image also records the browser's screen during a bypass while Debug mode is on. ffmpeg isn't in the image, so the container installs it in the background at startup, which needs network access. Bypasses that run before it finishes aren't recorded. The log says when the install succeeds, fails or gives up after 120 seconds. In non-root mode it can't install anything, so the log warns that bypasses won't be recorded and everything else works as normal.
++
+ ## Reporting an issue
+ 
+ Open an issue on [GitHub](https://github.com/calibrain/shelfmark/issues) and fill in the bug report template. A description of what you expected, the steps to reproduce it and the debug bundle are what make a problem findable.
 diff --git a/entrypoint.sh b/entrypoint.sh
-index 5bc7cc4..a2c380e 100644
+index 5bc7cc4..2a23e19 100644
 --- a/entrypoint.sh
 +++ b/entrypoint.sh
-@@ -498,6 +498,21 @@ else
+@@ -498,6 +498,50 @@ else
  fi
  command="${GUNICORN_BIN} --log-level ${gunicorn_loglevel} --access-logfile - --error-logfile - --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} shelfmark.main:app"
  
-+# Debug-mode screen recording needs ffmpeg, which the image leaves out because nothing
-+# else uses it. Ask the app rather than reading $DEBUG: the Debug Mode setting lives in
-+# the config file and needs a restart, so this is where it takes effect.
-+if [ "$USING_EXTERNAL_BYPASSER" != "true" ] && ! command -v ffmpeg >/dev/null 2>&1 &&
++# Debug mode's screen recording needs ffmpeg, which the image leaves out because nothing
++# else uses it. This runs in the background so a slow or silent mirror can't hold up
++# startup. A mirror can only hang the download, and killing that leaves nothing half
++# installed. dpkg then works from what's on disk, and the next start's --configure -a
++# clears up if a restart or the time limit cuts it off.
++install_ffmpeg() {
++    local limit="${FFMPEG_INSTALL_TIMEOUT:-120}" status=0
++    export DEBIAN_FRONTEND=noninteractive
++    umask 0022
++    timeout -k 10 "$limit" dpkg --configure -a || status=$?
++    if [ "$status" = 0 ]; then
++        # No && after update: a partial index failure should not rule out the install.
++        timeout -k 10 "$limit" sh -c 'apt-get update -o Acquire::Retries=3
++            apt-get install -y --no-install-recommends --download-only ffmpeg' || status=$?
++    fi
++    if [ "$status" = 0 ]; then
++        timeout -k 10 "$limit" apt-get install -y --no-install-recommends --no-download ffmpeg || status=$?
++    fi
++    case "$status" in
++        0)
++            if ffmpeg -version >/dev/null 2>&1; then
++                echo "ffmpeg installed; bypasses will be recorded from now on."
++            else
++                echo "Could not install ffmpeg (apt finished but ffmpeg does not run); bypasses will not be recorded."
++            fi
++            ;;
++        124 | 137) echo "Timed out installing ffmpeg after ${limit}s; bypasses will not be recorded." ;;
++        *) echo "Could not install ffmpeg (exit $status); bypasses will not be recorded." ;;
++    esac
++}
++
++# Ask the app rather than reading $DEBUG: the Debug Mode setting lives in the config file
++# and needs a restart, so this is where it takes effect.
++INSTALL_FFMPEG="false"
++if [ "$USING_EXTERNAL_BYPASSER" != "true" ] && ! ffmpeg -version >/dev/null 2>&1 &&
 +    "$PYTHON_BIN" -c 'from shelfmark.config.env import DEBUG; raise SystemExit(0 if DEBUG else 1)' 2>/dev/null; then
 +    if [ "$RUN_AS_NON_ROOT" = "true" ]; then
 +        echo "Debug mode is on but ffmpeg is not installed and non-root mode cannot install it; bypasses will not be recorded."
 +    else
-+        echo "Debug mode is on: installing ffmpeg for screen recording"
-+        # No && after update: a partial index failure should not rule out the install.
-+        { apt-get update -o Acquire::Retries=3; apt-get install -y --no-install-recommends ffmpeg; } ||
-+            echo "Could not install ffmpeg; bypasses will not be recorded."
++        echo "Debug mode is on: installing ffmpeg in the background; bypasses before it finishes will not be recorded."
++        INSTALL_FFMPEG="true"
 +    fi
 +fi
 +
  # If DEBUG and not using an external bypass
  if [ "$DEBUG" = "true" ] && [ "$USING_EXTERNAL_BYPASSER" != "true" ]; then
      set +e
+@@ -589,4 +633,13 @@ echo "Setting umask to $UMASK_VALUE"
+ umask $UMASK_VALUE
+ 
+ stop_file_logging
++# Started only now because stop_file_logging waits for the log pipe to close, which a
++# background job holding it would delay. The outer subshell leaves it to dumb-init to reap.
++if [ "$INSTALL_FFMPEG" = "true" ]; then
++    if [ "$FILE_LOGGING_ENABLED" = "true" ]; then
++        ( (install_ffmpeg 2>&1 | tee -a "$LOG_FILE") </dev/null & )
++    else
++        ( (install_ffmpeg 2>&1) </dev/null & )
++    fi
++fi
+ exec_as_target_user env HOME="$RUNTIME_HOME" $command
 diff --git a/shelfmark/bypass/internal_bypasser.py b/shelfmark/bypass/internal_bypasser.py
 index 27154ce..c4214a8 100644
 --- a/shelfmark/bypass/internal_bypasser.py
@@ -102,3 +158,100 @@ index e3f1def..277f783 100644
 +    assert ib.DISPLAY["ffmpeg"] is None
 +    assert any("ffmpeg is not installed" in message for message in warnings)
 +    assert not (tmp_path / "recording").exists()
+diff --git a/tests/config/test_entrypoint_ffmpeg_install.py b/tests/config/test_entrypoint_ffmpeg_install.py
+new file mode 100644
+index 0000000..466b9bf
+--- /dev/null
++++ b/tests/config/test_entrypoint_ffmpeg_install.py
+@@ -0,0 +1,91 @@
++"""The Debug mode ffmpeg install: what it runs, what it logs, and what it can't block."""
++
++from __future__ import annotations
++
++import os
++import shutil
++import subprocess
++from pathlib import Path
++
++ENTRYPOINT_PATH = Path(__file__).resolve().parents[2] / "entrypoint.sh"
++BASH_PATH = shutil.which("bash") or "/bin/bash"
++
++
++def _stub(bin_dir: Path, name: str, body: str) -> None:
++    path = bin_dir / name
++    path.write_text(f"#!/bin/sh\n{body}\n")
++    path.chmod(0o755)
++
++
++def _install_ffmpeg_source() -> str:
++    text = ENTRYPOINT_PATH.read_text()
++    start = text.index("install_ffmpeg() {")
++    return text[start : text.index("\n}\n", start) + 3]
++
++
++def _run(
++    tmp_path: Path, *, apt_body: str, ffmpeg_works: bool = True
++) -> tuple[subprocess.CompletedProcess[str], list[str]]:
++    bin_dir = tmp_path / "bin"
++    bin_dir.mkdir()
++    calls = tmp_path / "apt-calls.txt"
++    _stub(
++        bin_dir,
++        "apt-get",
++        f'echo "frontend=$DEBIAN_FRONTEND $*" >> "{calls}"\n{apt_body}',
++    )
++    _stub(bin_dir, "dpkg", "exit 0")
++    _stub(bin_dir, "ffmpeg", "exit 0" if ffmpeg_works else "exit 1")
++
++    env = os.environ.copy()
++    env.update({"PATH": f"{bin_dir}:{env.get('PATH', '')}", "FFMPEG_INSTALL_TIMEOUT": "1"})
++    result = subprocess.run(
++        [BASH_PATH, "-c", f"{_install_ffmpeg_source()}\ninstall_ffmpeg"],
++        capture_output=True,
++        env=env,
++        text=True,
++        check=False,
++        timeout=30,
++    )
++    return result, calls.read_text().splitlines() if calls.exists() else []
++
++
++def test_install_downloads_first_then_installs_without_the_network(tmp_path):
++    result, calls = _run(tmp_path, apt_body="exit 0")
++
++    assert "ffmpeg installed" in result.stdout
++    assert [call.split()[1] for call in calls] == ["update", "install", "install"]
++    assert "--download-only" in calls[1]
++    assert "--no-download" in calls[2]
++    assert all(call.startswith("frontend=noninteractive ") for call in calls)
++
++
++def test_install_gives_up_on_a_mirror_that_never_answers(tmp_path):
++    result, calls = _run(tmp_path, apt_body="exec sleep 60")
++
++    assert "Timed out installing ffmpeg after 1s" in result.stdout
++    assert "ffmpeg installed" not in result.stdout
++    # Killed during the download, so dpkg's install step never ran.
++    assert not any("--no-download" in call for call in calls)
++
++
++def test_install_reports_a_failure(tmp_path):
++    result, calls = _run(tmp_path, apt_body="exit 100")
++
++    assert "Could not install ffmpeg (exit 100)" in result.stdout
++    assert not any("--no-download" in call for call in calls)
++
++
++def test_install_does_not_claim_success_when_ffmpeg_does_not_run(tmp_path):
++    result, _ = _run(tmp_path, apt_body="exit 0", ffmpeg_works=False)
++
++    assert "ffmpeg does not run" in result.stdout
++    assert "ffmpeg installed" not in result.stdout
++
++
++def test_install_starts_after_the_log_pipe_is_released():
++    """stop_file_logging waits for the log pipe to close, so the job must not hold it."""
++    text = ENTRYPOINT_PATH.read_text()
++
++    assert text.rindex("stop_file_logging\n") < text.index('if [ "$INSTALL_FFMPEG" = "true" ]')
++    assert text.index('if [ "$INSTALL_FFMPEG" = "true" ]') < text.rindex("exec_as_target_user env")

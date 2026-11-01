@@ -102,6 +102,8 @@ It should only open an issue and not a bump PR. #1105 shows a new Debian Chromiu
 
 Not built or tested yet.
 
+What each bump still has to check is the click path. .73 clears DDoS-Guard on Anna's Archive from a residential network, but those challenges all cleared on the auto-wait step, so `_bypass_method_cdp_click` (and `_bypass_method_cdp_gui_click`, which runs before it) wasn't exercised. So the open Chromium regression question is that path, and no longer solving in general.
+
 ## d. Discussion: support policy for native Tor and WireGuard vs gluetun-style sidecars
 
 **Type:** discussion, not an issue

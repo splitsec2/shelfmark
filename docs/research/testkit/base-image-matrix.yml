@@ -1,0 +1,47 @@
+# Temporary test harness for the Shelfmark base image decision (calibrain/shelfmark#1616).
+# Builds locally on the runner and pushes nothing. This branch gets deleted afterwards.
+name: base-image-matrix
+on:
+  push:
+    branches: [test/base-image-matrix]
+permissions:
+  contents: read
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ffmpeg-optional]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the code under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: calibrain/shelfmark
+          ref: 0a7e114681a45c1473c92a5865dfc97c6bbc80e0
+          path: src
+          persist-credentials: false
+      - name: Apply the variant's patch
+        if: matrix.variant != 'main'
+        run: git -C src apply "$GITHUB_WORKSPACE/testkit/${{ matrix.variant }}.patch"
+      - name: Install uv for the e2e profiles
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.14"
+      - name: Run all cases
+        run: bash testkit/run.sh "${{ matrix.variant }}" "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: results-${{ matrix.variant }}-${{ matrix.arch }}
+          path: |
+            results/**/*.json
+            results/**/*.log
+            results/**/*.tsv
+            results/**/*.txt
+          retention-days: 14
