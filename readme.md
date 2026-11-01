@@ -72,7 +72,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes there
-instead of living in this fork. 99 pull requests from this fork have merged into
+instead of living in this fork. 102 pull requests from this fork have merged into
 calibrain/shelfmark and none have been closed unmerged. [The full list](https://github.com/calibrain/shelfmark/pulls?q=is%3Apr+is%3Amerged+author%3Asplitsec2)
 is on GitHub, and these are the clusters:
 
@@ -100,15 +100,22 @@ is on GitHub, and these are the clusters:
 Open:
 
 - [#1579](https://github.com/calibrain/shelfmark/pull/1579) let a book be requested alongside downloads
-- [#1617](https://github.com/calibrain/shelfmark/pull/1617) say in plain words what a failed download means and what happens next
 - [#1591](https://github.com/calibrain/shelfmark/pull/1591) answer anti-leech chat challenges from Soulseek uploaders, off by default
 - [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
   [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588))
+- [#1617](https://github.com/calibrain/shelfmark/pull/1617) say in plain words what a failed download means and what happens next
+- [#1618](https://github.com/calibrain/shelfmark/pull/1618) clearer cards, a Rejected view and Reopen for failed deliveries
+- [#1619](https://github.com/calibrain/shelfmark/pull/1619) sweep dead torrents and Soulseek leftovers on their own timer
+- [#1620](https://github.com/calibrain/shelfmark/pull/1620) an in-library badge for each format
+- [#1621](https://github.com/calibrain/shelfmark/pull/1621) flag search results that already have a pending request
+- [#1625](https://github.com/calibrain/shelfmark/pull/1625) move the auth routes into their own module
+- [#1626](https://github.com/calibrain/shelfmark/pull/1626) bound every call in a sync cycle, and report the scheduler's health
+- [#1627](https://github.com/calibrain/shelfmark/pull/1627) pair ebooks with audiobooks and tag the Audiobookshelf side (draft)
+- [#1628](https://github.com/calibrain/shelfmark/pull/1628) a report of the missing volumes in your series, with a way to request them (draft)
 - [#1631](https://github.com/calibrain/shelfmark/pull/1631) drop ffmpeg from the default image and install it on demand in Debug mode
 
 What stays here is what upstream has not been asked for yet: the changes marked not sent yet above, and
-the image build. The badges, the cross-format markers, the series gap report and the scheduler
-cycle guard are next, in small pieces.
+the image build.
 
 ## How it is maintained
 
