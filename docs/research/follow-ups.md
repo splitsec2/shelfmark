@@ -1,6 +1,6 @@
 # Base image follow-ups
 
-Follow-ups from the [base image report](https://github.com/splitsec2/shelfmark/blob/8509a385ddb6ef0bc5d5c03bc27b985daa219297/docs/research/2026-11-01-base-image-report.md), filed on calibrain/shelfmark on 2026-11-01 as written below. Numbers are from the real builds in that report, amd64 and arm64.
+Follow-ups from the [base image report](2026-11-01-base-image-report.md), filed on calibrain/shelfmark on 2026-11-01 as written below. Numbers are from the real builds in that report, amd64 and arm64.
 
 ## a. Issue: move supervisor to `uv.lock` and use libtk/libtcl directly
 
