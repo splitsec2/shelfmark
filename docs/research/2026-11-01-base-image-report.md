@@ -14,7 +14,7 @@ Every result here is `[verified]` from a real `docker build` on a GitHub-hosted 
 
 - **Run 1:** 41335522683. main, ffmpeg patch, #1616 as written. 6 jobs.
 - **Run 2:** 41339436116. main, ffmpeg patch, D1, D2, rebased Wolfi. 10 jobs, all from main at `0a7e114`.
-- **Harness:** temporary branch `test/base-image-matrix` on `splitsec2/shelfmark`, orphan, so none of Shelfmark's workflows ran. Actions pinned by SHA, scanners pinned by version or digest, no secrets, images never pushed, only logs and JSON uploaded. No job needed an infrastructure re-run.
+- **Harness:** the test script, helpers and variant patches are in [`testkit/`](testkit/), copied as they ran. It ran from a temporary orphan branch on `splitsec2/shelfmark`, so none of Shelfmark's workflows ran. Actions pinned by SHA, scanners pinned by version or digest, no secrets, images never pushed, only logs and JSON uploaded. No job needed an infrastructure re-run.
 
 ### The variants
 

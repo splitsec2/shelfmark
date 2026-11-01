@@ -1,0 +1,180 @@
+diff --git a/Dockerfile b/Dockerfile
+index 7d68336..00052cd 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -74,7 +74,6 @@ RUN apt-get update && \
+     gosu \
+     # --- Tor support (activated via USING_TOR=true) ---
+     tor \
+-    supervisor \
+     iptables \
+     # --- WireGuard support (activated via USING_WIREGUARD=true) ---
+     wireguard-tools \
+@@ -110,7 +109,11 @@ WORKDIR /app
+ COPY pyproject.toml uv.lock ./
+ RUN --mount=type=cache,target=/root/.cache/uv \
+     --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+-    uv sync --locked --no-default-groups
++    uv sync --locked --no-default-groups && \
++    # tor.sh expects supervisor at the Debian paths; it comes from uv.lock now.
++    ln -s /app/.venv/bin/supervisord /usr/bin/supervisord && \
++    ln -s /app/.venv/bin/supervisorctl /usr/bin/supervisorctl && \
++    mkdir -p /etc/supervisor
+ 
+ # Runtime dependencies are installed into /app/.venv during the build. Remove the
+ # base image's system pip so stale installer CVEs do not ship in the final image.
+@@ -158,12 +161,11 @@ RUN echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-
+     apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
+     # For dumb display
+     xvfb \
+-    # For screen recording
+-    ffmpeg \
+     chromium=${CHROMIUM_VERSION} \
+     chromium-common=${CHROMIUM_VERSION} \
+-    # For tkinter (pyautogui)
+-    python3-tk \
++    # The Tk libraries behind Python's own _tkinter (pyautogui -> mouseinfo -> tkinter).
++    # Not python3-tk: that one is for Debian's Python, which this image doesn't run.
++    libtk8.6 libtcl8.6 \
+     # For RAR extraction
+     unrar-free && \
+     # Keep apt from "upgrading" chromium past the pin inside derived images
+diff --git a/entrypoint.sh b/entrypoint.sh
+index 5bc7cc4..a2c380e 100644
+--- a/entrypoint.sh
++++ b/entrypoint.sh
+@@ -498,6 +498,21 @@ else
+ fi
+ command="${GUNICORN_BIN} --log-level ${gunicorn_loglevel} --access-logfile - --error-logfile - --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} shelfmark.main:app"
+ 
++# Debug-mode screen recording needs ffmpeg, which the image leaves out because nothing
++# else uses it. Ask the app rather than reading $DEBUG: the Debug Mode setting lives in
++# the config file and needs a restart, so this is where it takes effect.
++if [ "$USING_EXTERNAL_BYPASSER" != "true" ] && ! command -v ffmpeg >/dev/null 2>&1 &&
++    "$PYTHON_BIN" -c 'from shelfmark.config.env import DEBUG; raise SystemExit(0 if DEBUG else 1)' 2>/dev/null; then
++    if [ "$RUN_AS_NON_ROOT" = "true" ]; then
++        echo "Debug mode is on but ffmpeg is not installed and non-root mode cannot install it; bypasses will not be recorded."
++    else
++        echo "Debug mode is on: installing ffmpeg for screen recording"
++        # No && after update: a partial index failure should not rule out the install.
++        { apt-get update -o Acquire::Retries=3; apt-get install -y --no-install-recommends ffmpeg; } ||
++            echo "Could not install ffmpeg; bypasses will not be recorded."
++    fi
++fi
++
+ # If DEBUG and not using an external bypass
+ if [ "$DEBUG" = "true" ] && [ "$USING_EXTERNAL_BYPASSER" != "true" ]; then
+     set +e
+diff --git a/pyproject.toml b/pyproject.toml
+index d020e26..eefe073 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -30,6 +30,7 @@ dependencies = [
+     # requests cannot speak. See shelfmark/download/doh_wireformat.py.
+     "httpx[http2]>=0.28.1",
+     "publicsuffixlist>=1.1.2.20261023",
++    "supervisor==4.3.0",
+ ]
+ 
+ [project.optional-dependencies]
+diff --git a/shelfmark/bypass/internal_bypasser.py b/shelfmark/bypass/internal_bypasser.py
+index 27154ce..c4214a8 100644
+--- a/shelfmark/bypass/internal_bypasser.py
++++ b/shelfmark/bypass/internal_bypasser.py
+@@ -5,6 +5,7 @@ import asyncio
+ import json
+ import os
+ import random
++import shutil
+ import signal
+ import socket
+ import stat
+@@ -1499,6 +1500,11 @@ async def _close_websocket_connection(conn: Any) -> None:
+ def _start_ffmpeg_recording(display: str) -> None:
+     """Start FFmpeg screen recording for debug mode."""
+     global DISPLAY
++    # Debug mode can be on when ffmpeg is not installed. A recording is a diagnostic, so
++    # going without one must not fail the bypass it was meant to help diagnose.
++    if shutil.which("ffmpeg") is None:
++        logger.warning("ffmpeg is not installed; no recording for this bypass.")
++        return
+     RECORDING_DIR.mkdir(parents=True, exist_ok=True)
+     timestamp = datetime.now(UTC).strftime("%y%m%d-%H%M%S")
+     output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
+diff --git a/tests/bypass/test_ffmpeg_recording_diagnostics.py b/tests/bypass/test_ffmpeg_recording_diagnostics.py
+index e3f1def..277f783 100644
+--- a/tests/bypass/test_ffmpeg_recording_diagnostics.py
++++ b/tests/bypass/test_ffmpeg_recording_diagnostics.py
+@@ -24,6 +24,12 @@ def _clean_display():
+     ib.DISPLAY.update(before)
+ 
+ 
++@pytest.fixture(autouse=True)
++def _ffmpeg_on_path(monkeypatch):
++    # The recorder checks for the binary first; these tests stub the process itself.
++    monkeypatch.setattr(ib.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
++
++
+ class _Proc:
+     def __init__(self, returncode):
+         self.returncode = returncode
+@@ -133,3 +139,23 @@ def test_summary_survives_a_missing_log():
+     ib.DISPLAY["ffmpeg_error_log"] = None
+ 
+     assert "No FFmpeg error log" in ib._ffmpeg_error_summary()
++
++
++def test_debug_mode_without_ffmpeg_skips_the_recording_and_says_so(monkeypatch, tmp_path):
++    """Debug mode can be on with no ffmpeg in the image; that must not fail the bypass."""
++    monkeypatch.setattr(ib, "RECORDING_DIR", tmp_path / "recording")
++    monkeypatch.setattr(ib.shutil, "which", lambda _name: None)
++
++    def popen_must_not_run(*_args, **_kwargs):
++        raise AssertionError("ffmpeg should not be started when it is not installed")
++
++    monkeypatch.setattr(ib.subprocess, "Popen", popen_must_not_run)
++
++    warnings: list[str] = []
++    monkeypatch.setattr(ib.logger, "warning", lambda msg, *_args: warnings.append(msg))
++
++    ib._start_ffmpeg_recording(display=":99")
++
++    assert ib.DISPLAY["ffmpeg"] is None
++    assert any("ffmpeg is not installed" in message for message in warnings)
++    assert not (tmp_path / "recording").exists()
+diff --git a/uv.lock b/uv.lock
+index 76ba427..97d438d 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1569,6 +1569,7 @@ dependencies = [
+     { name = "qbittorrent-api" },
+     { name = "rarfile" },
+     { name = "requests", extra = ["socks"] },
++    { name = "supervisor" },
+     { name = "tqdm" },
+     { name = "transmission-rpc" },
+ ]
+@@ -1618,6 +1619,7 @@ requires-dist = [
+     { name = "rarfile" },
+     { name = "requests", extras = ["socks"] },
+     { name = "seleniumbase", marker = "extra == 'browser'", specifier = "==4.56.4" },
++    { name = "supervisor", specifier = "==4.3.0" },
+     { name = "tqdm" },
+     { name = "transmission-rpc" },
+ ]
+@@ -1682,6 +1684,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/07/66/473f7ca0be0b06e38ee8c85ee2db184e3981bd769fac2e7c19c8a8865211/soupsieve-3.0.4-py3-none-any.whl", hash = "sha256:8412826614f9c632227067d0985aeb9f584bd15efc852955430e097a9fe7afbf", size = 42458, upload-time = "2026-10-22T00:45:24.843Z" },
+ ]
+ 
++[[package]]
++name = "supervisor"
++version = "4.3.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/a9/b5/37e7a3706de436a8a2d75334711dad1afb4ddffab09f25e31d89e467542f/supervisor-4.3.0.tar.gz", hash = "sha256:4a2bf149adf42997e1bb44b70c43b613275ec9852c3edacca86a9166b27e945e", size = 468912, upload-time = "2025-08-23T18:25:02.418Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/0e/65/5e726c372da8a5e35022a94388b12252710aad0c2351699c3d76ae8dba78/supervisor-4.3.0-py2.py3-none-any.whl", hash = "sha256:0bcb763fddafba410f35cbde226aa7f8514b9fb82eb05a0c85f6588d1c13f8db", size = 320736, upload-time = "2025-08-23T18:25:00.767Z" },
++]
++
+ [[package]]
+ name = "tabcompleter"
+ version = "1.4.1"
