@@ -296,7 +296,13 @@ describe('activityMappers timing', () => {
 
   it('only says how long ago for a failed download', () => {
     const item = downloadToActivityItem(
-      { id: 't2', title: 'X', author: 'Y', added_time: nowSeconds - 600, finished_at: nowSeconds - 300 },
+      {
+        id: 't2',
+        title: 'X',
+        author: 'Y',
+        added_time: nowSeconds - 600,
+        finished_at: nowSeconds - 300,
+      },
       'error',
     );
     expect(item.metaLine).toContain('5m ago');

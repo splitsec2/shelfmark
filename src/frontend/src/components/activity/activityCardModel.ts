@@ -1,5 +1,9 @@
 import type { RequestRecord } from '../../types';
-import { isAutomaticNote, isRetryingAutomatically, stripAutomaticMarker } from './activityAutomation';
+import {
+  isAutomaticNote,
+  isRetryingAutomatically,
+  stripAutomaticMarker,
+} from './activityAutomation';
 import { isActiveDownloadStatus } from './activityStyles.js';
 import type { ActivityItem, ActivityVisualStatus } from './activityTypes';
 

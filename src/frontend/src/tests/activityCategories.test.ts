@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isAutomaticNote, isRetryingAutomatically, stripAutomaticMarker } from '../components/activity/activityAutomation';
+
+import {
+  isAutomaticNote,
+  isRetryingAutomatically,
+  stripAutomaticMarker,
+} from '../components/activity/activityAutomation';
 import {
   getActivityCategory,
   getCategoryHint,
@@ -51,18 +56,31 @@ describe('automatic notes', () => {
 
 describe('isRetryingAutomatically', () => {
   it('is true for a pending request the automation reopened', () => {
-    expect(isRetryingAutomatically({ status: 'pending', admin_note: '[auto] retry batch 5' })).toBe(true);
+    expect(isRetryingAutomatically({ status: 'pending', admin_note: '[auto] retry batch 5' })).toBe(
+      true,
+    );
     expect(
-      isRetryingAutomatically({ status: 'pending', last_failure_reason: 'Retrying after a 20-minute cooldown (failed)' }),
+      isRetryingAutomatically({
+        status: 'pending',
+        last_failure_reason: 'Retrying after a 20-minute cooldown (failed)',
+      }),
     ).toBe(true);
     expect(
-      isRetryingAutomatically({ status: 'pending', last_failure_reason: 'Interrupted by a restart' }),
+      isRetryingAutomatically({
+        status: 'pending',
+        last_failure_reason: 'Interrupted by a restart',
+      }),
     ).toBe(true);
   });
 
   it('is false when nothing was reopened, or the request is not pending', () => {
     expect(isRetryingAutomatically({ status: 'pending' })).toBe(false);
-    expect(isRetryingAutomatically({ status: 'pending', last_failure_reason: 'All download sources failed' })).toBe(false);
+    expect(
+      isRetryingAutomatically({
+        status: 'pending',
+        last_failure_reason: 'All download sources failed',
+      }),
+    ).toBe(false);
     expect(isRetryingAutomatically({ status: 'rejected', admin_note: '[auto] retry' })).toBe(false);
     expect(isRetryingAutomatically(null)).toBe(false);
   });
@@ -70,12 +88,16 @@ describe('isRetryingAutomatically', () => {
 
 describe('request categories', () => {
   it('puts a reopened request under Retrying Automatically', () => {
-    expect(getActivityCategory(pendingItem({ admin_note: '[auto] retry batch 5' }))).toBe('auto_retry');
+    expect(getActivityCategory(pendingItem({ admin_note: '[auto] retry batch 5' }))).toBe(
+      'auto_retry',
+    );
   });
 
   it('keeps a request nothing matched under No Match Yet', () => {
     expect(getActivityCategory(pendingItem({}))).toBe('needs_review');
-    expect(getActivityCategory(pendingItem({ last_failure_reason: 'All download sources failed' }))).toBe('needs_review');
+    expect(
+      getActivityCategory(pendingItem({ last_failure_reason: 'All download sources failed' })),
+    ).toBe('needs_review');
   });
 
   it('labels the sections for what they mean', () => {
