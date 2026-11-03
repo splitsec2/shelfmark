@@ -71,7 +71,7 @@ Docs for the added features live on the branches that carry them:
 ## Upstream first
 
 Anything here that is *not* library integration or automation belongs upstream, and goes there
-instead of living in this fork. 102 pull requests from this fork have merged into
+instead of living in this fork. 113 pull requests from this fork have merged into
 calibrain/shelfmark and none have been closed unmerged. [The full list](https://github.com/calibrain/shelfmark/pulls?q=is%3Apr+is%3Amerged+author%3Asplitsec2)
 is on GitHub, and these are the clusters:
 
@@ -87,14 +87,14 @@ is on GitHub, and these are the clusters:
 - **Requests and the activity list**: [#1438](https://github.com/calibrain/shelfmark/pull/1438), [#1491](https://github.com/calibrain/shelfmark/pull/1491), [#1496](https://github.com/calibrain/shelfmark/pull/1496), [#1506](https://github.com/calibrain/shelfmark/pull/1506), [#1507](https://github.com/calibrain/shelfmark/pull/1507), [#1508](https://github.com/calibrain/shelfmark/pull/1508), [#1513](https://github.com/calibrain/shelfmark/pull/1513), [#1541](https://github.com/calibrain/shelfmark/pull/1541), [#1597](https://github.com/calibrain/shelfmark/pull/1597), [#1598](https://github.com/calibrain/shelfmark/pull/1598).
 - **Search, metadata and library check**: [#1371](https://github.com/calibrain/shelfmark/pull/1371), [#1377](https://github.com/calibrain/shelfmark/pull/1377), [#1380](https://github.com/calibrain/shelfmark/pull/1380), [#1434](https://github.com/calibrain/shelfmark/pull/1434), [#1537](https://github.com/calibrain/shelfmark/pull/1537), [#1587](https://github.com/calibrain/shelfmark/pull/1587), series labels in front of a title (in [#1535](https://github.com/calibrain/shelfmark/pull/1535), for the Calibre and the Audiobookshelf check), the Calibre half of the library check
   after [discussion #1372](https://github.com/calibrain/shelfmark/discussions/1372).
-- **Auth, errors and logs**: [#1356](https://github.com/calibrain/shelfmark/pull/1356), [#1358](https://github.com/calibrain/shelfmark/pull/1358), [#1359](https://github.com/calibrain/shelfmark/pull/1359), [#1360](https://github.com/calibrain/shelfmark/pull/1360) and [#1558](https://github.com/calibrain/shelfmark/pull/1558), [#1559](https://github.com/calibrain/shelfmark/pull/1559), [#1562](https://github.com/calibrain/shelfmark/pull/1562), [#1571](https://github.com/calibrain/shelfmark/pull/1571), [#1578](https://github.com/calibrain/shelfmark/pull/1578), [#1593](https://github.com/calibrain/shelfmark/pull/1593), [#1603](https://github.com/calibrain/shelfmark/pull/1603), which keep
+- **Auth, errors and logs**: [#1356](https://github.com/calibrain/shelfmark/pull/1356), [#1358](https://github.com/calibrain/shelfmark/pull/1358), [#1359](https://github.com/calibrain/shelfmark/pull/1359), [#1360](https://github.com/calibrain/shelfmark/pull/1360) and [#1558](https://github.com/calibrain/shelfmark/pull/1558), [#1559](https://github.com/calibrain/shelfmark/pull/1559), [#1562](https://github.com/calibrain/shelfmark/pull/1562), [#1571](https://github.com/calibrain/shelfmark/pull/1571), [#1578](https://github.com/calibrain/shelfmark/pull/1578), [#1593](https://github.com/calibrain/shelfmark/pull/1593), [#1603](https://github.com/calibrain/shelfmark/pull/1603), [#1643](https://github.com/calibrain/shelfmark/pull/1643), which keep
   credentials, paths and exception text out of logs and responses. The fail-open auth fix that
   [DrNgo/shelfmark-fork](https://github.com/DrNgo/shelfmark-fork) made first went in as [#1397](https://github.com/calibrain/shelfmark/pull/1397), so this fork no longer carries its own copy.
 - **Speed**: [#1539](https://github.com/calibrain/shelfmark/pull/1539), [#1544](https://github.com/calibrain/shelfmark/pull/1544), [#1545](https://github.com/calibrain/shelfmark/pull/1545), [#1546](https://github.com/calibrain/shelfmark/pull/1546).
-- **Image and build**: [#1379](https://github.com/calibrain/shelfmark/pull/1379), [#1404](https://github.com/calibrain/shelfmark/pull/1404), [#1435](https://github.com/calibrain/shelfmark/pull/1435), the Chromium pin [#1614](https://github.com/calibrain/shelfmark/pull/1614), and [#1615](https://github.com/calibrain/shelfmark/pull/1615), which drops the
+- **Image and build**: [#1379](https://github.com/calibrain/shelfmark/pull/1379), [#1404](https://github.com/calibrain/shelfmark/pull/1404), [#1435](https://github.com/calibrain/shelfmark/pull/1435), the Chromium pin [#1614](https://github.com/calibrain/shelfmark/pull/1614) and its removal [#1648](https://github.com/calibrain/shelfmark/pull/1648), [#1631](https://github.com/calibrain/shelfmark/pull/1631), which drops ffmpeg from the default image, and [#1615](https://github.com/calibrain/shelfmark/pull/1615), which drops the
   unused selenium-manager binaries after [@wrycu](https://github.com/wrycu) raised the image contents in [#1606](https://github.com/calibrain/shelfmark/pull/1606).
 - **Docs, tests and tidying**: [#1564](https://github.com/calibrain/shelfmark/pull/1564), [#1565](https://github.com/calibrain/shelfmark/pull/1565), [#1566](https://github.com/calibrain/shelfmark/pull/1566), [#1567](https://github.com/calibrain/shelfmark/pull/1567), [#1563](https://github.com/calibrain/shelfmark/pull/1563), [#1576](https://github.com/calibrain/shelfmark/pull/1576), [#1594](https://github.com/calibrain/shelfmark/pull/1594), [#1595](https://github.com/calibrain/shelfmark/pull/1595) (routes out of `main.py`) and
-  [#1580](https://github.com/calibrain/shelfmark/pull/1580), [#1381](https://github.com/calibrain/shelfmark/pull/1381), [#1622](https://github.com/calibrain/shelfmark/pull/1622), and the route moves [#1623](https://github.com/calibrain/shelfmark/pull/1623) and [#1624](https://github.com/calibrain/shelfmark/pull/1624).
+  [#1580](https://github.com/calibrain/shelfmark/pull/1580), [#1381](https://github.com/calibrain/shelfmark/pull/1381), [#1622](https://github.com/calibrain/shelfmark/pull/1622), the route moves [#1623](https://github.com/calibrain/shelfmark/pull/1623), [#1624](https://github.com/calibrain/shelfmark/pull/1624), [#1625](https://github.com/calibrain/shelfmark/pull/1625) and [#1637](https://github.com/calibrain/shelfmark/pull/1637) to [#1642](https://github.com/calibrain/shelfmark/pull/1642), and [#1649](https://github.com/calibrain/shelfmark/pull/1649), which fixes the typecheck that main had failed since [#1632](https://github.com/calibrain/shelfmark/pull/1632).
 
 Open:
 
@@ -107,11 +107,9 @@ Open:
 - [#1619](https://github.com/calibrain/shelfmark/pull/1619) sweep dead torrents and Soulseek leftovers on their own timer
 - [#1620](https://github.com/calibrain/shelfmark/pull/1620) an in-library badge for each format
 - [#1621](https://github.com/calibrain/shelfmark/pull/1621) flag search results that already have a pending request
-- [#1625](https://github.com/calibrain/shelfmark/pull/1625) move the auth routes into their own module
 - [#1626](https://github.com/calibrain/shelfmark/pull/1626) bound every call in a sync cycle, and report the scheduler's health
 - [#1627](https://github.com/calibrain/shelfmark/pull/1627) pair ebooks with audiobooks and tag the Audiobookshelf side (draft)
 - [#1628](https://github.com/calibrain/shelfmark/pull/1628) a report of the missing volumes in your series, with a way to request them (draft)
-- [#1631](https://github.com/calibrain/shelfmark/pull/1631) drop ffmpeg from the default image and install it on demand in Debug mode
 
 What stays here is what upstream has not been asked for yet: the changes marked not sent yet above, and
 the image build.
