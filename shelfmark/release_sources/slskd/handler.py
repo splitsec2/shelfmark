@@ -831,6 +831,7 @@ class SlskdHandler(DownloadHandler):
         # A restart or retry finds the files already there: nothing to download again.
         if _folder_complete(folder, expected):
             logger.info("slskd: %s already holds the files for %s", folder, task.task_id)
+            task.reattached = True
             progress_callback(100.0)
             return self._finish_isolated(task, client, spec.username, [], folder)
         # An earlier attempt's files (a restart, or a cleanup that failed). They are finished,
@@ -878,6 +879,8 @@ class SlskdHandler(DownloadHandler):
         failures = batch["failures"]
         if failures:
             ids, unresolved = self._rejoin_refused(client, spec, ids, failures)
+            if len(unresolved) < len(failures):
+                task.reattached = True  # slskd already had some of the files; they were joined
             if unresolved:
                 first = unresolved[0].get("message") or "unknown reason"
                 status_callback("error", f"slskd refused {len(unresolved)} file(s): {first}")
