@@ -122,7 +122,12 @@ The fork-only features are separate branches on top of upstream `main`, one per 
 can go upstream on its own, **rebased** and never merged, so every fork-only commit stays a
 reviewable patch on top of current upstream. A weekly job trial-rebases them, runs upstream's
 test suite and reports when upstream has moved. Images publish to
-`ghcr.io/splitsec2/shelfmark:sha-<7>` from `build/fork-images`.
+`ghcr.io/splitsec2/shelfmark:sha-<7>` from `build/fork-images`, and the same build moves `:dev`.
+
+`:dev` (and `shelfmark-lite:dev`) is upstream plus every change on this page that upstream has
+not merged yet, which makes it the build I run myself. It moves with each sync and carries things
+upstream has not reviewed, so pin a `sha-<7>` tag if you want a build that stays put. If you only
+want upstream's own release, use [the upstream image](https://github.com/calibrain/shelfmark).
 
 Licence and copyright are upstream's, unchanged.
 
