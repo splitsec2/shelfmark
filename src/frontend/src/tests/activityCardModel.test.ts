@@ -322,7 +322,7 @@ describe('activityCardModel', () => {
     expect(requesterLine).toBe('"already in the library"');
   });
 
-  it('says a decline the automation made was automatic, not a person\'s', () => {
+  it("says a decline the automation made was automatic, not a person's", () => {
     const record = {
       id: 46,
       user_id: 7,

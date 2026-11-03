@@ -7,8 +7,6 @@ import { useRejectedRequests } from '../../hooks/useRejectedRequests';
 import type { RequestRecord, StatusData } from '../../types';
 import { Dropdown } from '../Dropdown';
 import { ActivityCard } from './ActivityCard';
-import type { DownloadStatusKey } from './activityMappers';
-import { downloadToActivityItem, linkedDownloadIdForRequest } from './activityMappers';
 import {
   getActivityCategory,
   getCategoryHint,
@@ -17,6 +15,8 @@ import {
   type ActivityCategoryKey,
   type ActivityTabKey,
 } from './activityCategories';
+import type { DownloadStatusKey } from './activityMappers';
+import { downloadToActivityItem, linkedDownloadIdForRequest } from './activityMappers';
 import type { ActivityItem } from './activityTypes';
 import { getClearCompletedTargets } from './clearCompleted';
 

@@ -1,5 +1,5 @@
-import type { ActivityItem } from './activityTypes';
 import { isRetryingAutomatically } from './activityAutomation';
+import type { ActivityItem } from './activityTypes';
 
 export type ActivityCategoryKey =
   | 'needs_review'

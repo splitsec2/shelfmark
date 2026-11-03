@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { buildTimingText, formatAgo, formatDuration } from '../components/activity/activityTiming';
 
 const SECOND = 1000;
@@ -61,12 +62,19 @@ describe('buildTimingText', () => {
 
   it('leads the ago text with a prefix when one is given', () => {
     expect(
-      buildTimingText({ finishedMs: now - 3 * HOUR, showDuration: false, agoPrefix: 'delivered', now }),
+      buildTimingText({
+        finishedMs: now - 3 * HOUR,
+        showDuration: false,
+        agoPrefix: 'delivered',
+        now,
+      }),
     ).toBe('delivered 3h ago');
   });
 
   it('skips the duration when the start is unknown or after the end', () => {
-    expect(buildTimingText({ finishedMs: now - MINUTE * 5, showDuration: true, now })).toBe('5m ago');
+    expect(buildTimingText({ finishedMs: now - MINUTE * 5, showDuration: true, now })).toBe(
+      '5m ago',
+    );
     expect(
       buildTimingText({ startedMs: now, finishedMs: now - MINUTE * 5, showDuration: true, now }),
     ).toBe('5m ago');
