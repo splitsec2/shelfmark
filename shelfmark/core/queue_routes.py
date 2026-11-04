@@ -16,6 +16,7 @@ from shelfmark.core.logger import setup_logger
 from shelfmark.core.models import build_filename
 from shelfmark.core.request_helpers import normalize_optional_text, normalize_positive_int
 from shelfmark.core.requests_service import sync_delivery_states_from_queue_status
+from shelfmark.core.utils import is_within_download_roots
 from shelfmark.core.viewer_redaction import (
     is_public_download_id,
     match_public_download_id,
@@ -103,6 +104,17 @@ def _viewer_queue_task_id(task_id: str) -> str:
     """Return the id a non-admin sees for a live queue task."""
     task = backend.book_queue.get_task(task_id)
     return viewer_download_id(task_id, getattr(task, "request_id", None))
+
+
+def _outside_download_roots(paths: list[str], book_id: str) -> bool:
+    """Whether any path is outside the download folders, logging the first that is."""
+    for path in paths:
+        if not is_within_download_roots(path):
+            logger.warning(
+                "Not sending %s for download %s: it is not inside a download folder", path, book_id
+            )
+            return True
+    return False
 
 
 def _attachment_filename_options(download_name: str) -> dict[str, str]:
@@ -257,6 +269,8 @@ def register_queue_routes(
                                     )
                                 )
                                 if download_path:
+                                    if _outside_download_roots([download_path], book_id):
+                                        return jsonify({"error": "File not found"}), 404
                                     return send_file(
                                         download_path,
                                         download_name=Path(download_path).name,
@@ -275,6 +289,9 @@ def register_queue_routes(
                     actor_username=actor_username if isinstance(actor_username, str) else None,
                 ):
                     return jsonify({"error": "File not found"}), 404
+
+            if _outside_download_roots(file_paths, book_id):
+                return jsonify({"error": "File not found"}), 404
 
             if book_info is not None and len(file_paths) > 1:
                 return _zip_download_response(file_paths, book_info)

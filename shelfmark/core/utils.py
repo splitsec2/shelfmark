@@ -379,6 +379,62 @@ def get_destination(
     )
 
 
+def _destination_root(template: str) -> Path | None:
+    """The fixed part of a destination template: its folders up to any ``{User}`` placeholder."""
+    kept: list[str] = []
+    for part in Path(template).parts:
+        if _USER_PLACEHOLDER_PATTERN.search(part):
+            break
+        kept.append(part)
+    return Path(*kept) if kept else None
+
+
+def get_download_roots() -> list[Path]:
+    """Every folder Shelfmark writes finished downloads to, resolved.
+
+    The book and audiobook destinations (per-user folders have to sit inside them), the
+    Anna's Archive content-type folders, the legacy INGEST_DIR and TMP_DIR. Relative and
+    unset values are left out. These are the current settings, so a download made before a
+    destination was changed is outside them.
+    """
+    from shelfmark.config import env as env_config
+    from shelfmark.core.config import config
+
+    candidates = [
+        _destination_root(get_global_destination()),
+        _destination_root(get_global_destination(is_audiobook=True)),
+        _coerce_config_path(config.get("INGEST_DIR", "")),
+        *(
+            _coerce_config_path(config.get(key, ""))
+            for key in (
+                *_AA_CONTENT_TYPE_TO_CONFIG_KEY.values(),
+                *_LEGACY_CONTENT_TYPE_TO_CONFIG_KEY.values(),
+            )
+        ),
+        Path(env_config.TMP_DIR),
+    ]
+    roots: list[Path] = []
+    for candidate in candidates:
+        if candidate is None or not candidate.is_absolute():
+            continue
+        try:
+            root = candidate.resolve()
+        except OSError, RuntimeError:
+            continue
+        if root not in roots:
+            roots.append(root)
+    return roots
+
+
+def is_within_download_roots(path: str | os.PathLike[str]) -> bool:
+    """Whether a file exists and, with symlinks followed, sits inside a download folder."""
+    try:
+        resolved = Path(path).resolve(strict=True)
+    except OSError, RuntimeError:
+        return False
+    return any(resolved.is_relative_to(root) for root in get_download_roots())
+
+
 def get_aa_content_type_dir(content_type: str | None = None) -> Path | None:
     """Get override directory for AA content-type routing if configured."""
     from shelfmark.core.config import config

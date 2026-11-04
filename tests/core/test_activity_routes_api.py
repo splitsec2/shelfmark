@@ -32,6 +32,13 @@ def client(main_module):
     return main_module.app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _tmp_path_is_a_download_folder(tmp_path):
+    """/api/localdownload only sends files from inside a download folder (#1661)."""
+    with patch("shelfmark.core.utils.get_download_roots", return_value=[tmp_path.resolve()]):
+        yield
+
+
 def _set_session(client, *, user_id: str, db_user_id: int | None, is_admin: bool) -> None:
     with client.session_transaction() as sess:
         sess["user_id"] = user_id

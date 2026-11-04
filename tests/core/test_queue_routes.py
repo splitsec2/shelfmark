@@ -64,6 +64,79 @@ def _builtin(main_module):
 
 
 class TestLocalDownload:
+    @pytest.fixture(autouse=True)
+    def _tmp_path_is_a_download_folder(self, tmp_path):
+        with patch("shelfmark.core.utils.get_download_roots", return_value=[tmp_path.resolve()]):
+            yield
+
+    def test_a_file_outside_the_download_folders_is_a_404(self, main_module, client, tmp_path):
+        outside = tmp_path.parent / f"outside-{uuid.uuid4().hex[:8]}.epub"
+        outside.write_bytes(b"not-a-library-file")
+        _login(client, is_admin=True)
+        try:
+            with _builtin(main_module):
+                with patch.object(
+                    main_module.backend, "get_book_paths", return_value=([str(outside)], _task())
+                ):
+                    resp = client.get("/api/localdownload?id=task-1")
+        finally:
+            outside.unlink()
+
+        assert resp.status_code == 404
+        assert resp.get_json() == {"error": "File not found"}
+
+    def test_one_file_outside_refuses_the_whole_zip(self, main_module, client, tmp_path):
+        inside = tmp_path / "01.mp3"
+        inside.write_bytes(b"one")
+        outside = tmp_path.parent / f"outside-{uuid.uuid4().hex[:8]}.mp3"
+        outside.write_bytes(b"two")
+        _login(client, is_admin=True)
+        try:
+            with _builtin(main_module):
+                with patch.object(
+                    main_module.backend,
+                    "get_book_paths",
+                    return_value=([str(inside), str(outside)], _task()),
+                ):
+                    resp = client.get("/api/localdownload?id=task-1")
+        finally:
+            outside.unlink()
+
+        assert resp.status_code == 404
+
+    def test_a_history_path_outside_the_download_folders_is_a_404(
+        self, main_module, client, tmp_path
+    ):
+        outside = tmp_path.parent / f"outside-{uuid.uuid4().hex[:8]}.epub"
+        outside.write_bytes(b"from-history")
+        user = _create_user(main_module, prefix="reader")
+        _login(client, user_id=user["username"], db_user_id=user["id"])
+        history = MagicMock()
+        history.get_by_task_id.return_value = {"user_id": user["id"], "download_path": str(outside)}
+        try:
+            with _builtin(main_module):
+                with patch.object(main_module.backend, "get_book_paths", return_value=([], None)):
+                    with patch.object(main_module, "download_history_service", history):
+                        resp = client.get("/api/localdownload?id=task-1")
+        finally:
+            outside.unlink()
+
+        assert resp.status_code == 404
+        assert resp.get_json() == {"error": "File not found"}
+
+    def test_a_title_with_dots_is_served(self, main_module, client, tmp_path):
+        book = tmp_path / "Some Author - Wait... What_ (2020).epub"
+        book.write_bytes(b"dots")
+        _login(client, is_admin=True)
+        with _builtin(main_module):
+            with patch.object(
+                main_module.backend, "get_book_paths", return_value=([str(book)], _task())
+            ):
+                resp = client.get("/api/localdownload?id=task-1")
+
+        assert resp.status_code == 200
+        assert resp.data == b"dots"
+
     def test_missing_id_is_a_400(self, main_module, client):
         _login(client, is_admin=True)
         with _builtin(main_module):
