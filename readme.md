@@ -83,8 +83,9 @@ is on GitHub, and these are the clusters:
 
 Open, by upstream milestone:
 
-- **v1.7.1**: [#1654](https://github.com/calibrain/shelfmark/pull/1654) supervisor and tk without Debian's Python, [#1656](https://github.com/calibrain/shelfmark/pull/1656) AudiobookBay base64 posts, [#1657](https://github.com/calibrain/shelfmark/pull/1657) drop Mesa and LLVM, [#1675](https://github.com/calibrain/shelfmark/pull/1675) local download sends only the delivered file
-- **v1.8.0**: [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
+- **v1.7.1**: [#1656](https://github.com/calibrain/shelfmark/pull/1656) AudiobookBay base64 posts
+- **v1.8.0**: [#1654](https://github.com/calibrain/shelfmark/pull/1654) supervisor and tk without Debian's Python, [#1657](https://github.com/calibrain/shelfmark/pull/1657) drop Mesa and LLVM, [#1675](https://github.com/calibrain/shelfmark/pull/1675) local download sends only the delivered file
+- **v1.9.0**: [#1592](https://github.com/calibrain/shelfmark/pull/1592) sync each user's own Hardcover account (plan item 9 of the
   [original split](https://github.com/calibrain/shelfmark/pull/1047#issuecomment-6302071588)), [#1684](https://github.com/calibrain/shelfmark/pull/1684) lists and shelves follow the signed-in user, [#1620](https://github.com/calibrain/shelfmark/pull/1620) an in-library badge for each format, [#1621](https://github.com/calibrain/shelfmark/pull/1621) flag search results that already have a pending request, [#1626](https://github.com/calibrain/shelfmark/pull/1626) bound every call in a sync cycle and report the scheduler's health, [#1627](https://github.com/calibrain/shelfmark/pull/1627) pair ebooks with audiobooks and tag the Audiobookshelf side, [#1628](https://github.com/calibrain/shelfmark/pull/1628) a report of the missing volumes in your series
 
 What stays here is the image build.
