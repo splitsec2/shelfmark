@@ -12,7 +12,7 @@ Shelfmark feeds a Calibre-Web-Automated library and an Audiobookshelf server. It
 upstream took things: the Hardcover sync, the Audiobookshelf check, the automatic downloads and
 the activity list work are all upstream now, and this page lists only what is still different.
 
-The fork's `main` is upstream at [`bb13fae0`](https://github.com/calibrain/shelfmark/commit/bb13fae0bbe4876d7fa641f4f7e5980b7e929469), the commit v1.7.0 is cut from, plus this README.
+The fork's `main` is upstream at [`0d97110f`](https://github.com/calibrain/shelfmark/commit/0d97110f0132d78147213d11902298c516c32f16), the commit v1.7.0 is cut from, plus this README.
 Everything below is open upstream, so the build here is upstream with those PRs applied ahead
 of review. The only **fork only** change is the image build, which is not meant for upstream.
 Changes carried from someone else's work credit them.
