@@ -41,6 +41,16 @@ Audiobookshelf titles are often raw folder names such as `Alex Cross 02: Kiss th
 When the server reports a series for the item, the leading label and number are read as the
 series, not as a different book, so a search for `Kiss the Girls` still matches.
 
+## Shared access for Hardcover
+
+In **Settings → General**, mark a configured library with **Everyone can access this Calibre library**
+or **Everyone can access this Audiobookshelf library** when every Shelfmark user can access
+all of the items it indexes. Both settings are off by default. For Audiobookshelf, use
+**Audiobookshelf Library IDs** to limit indexing to the libraries you share.
+
+A matching copy in a shared library can satisfy personal Hardcover requests for its format.
+Shelfmark reads the configured index and relies on the admin's confirmation of access.
+
 ## How a match is decided
 
 In order of confidence:

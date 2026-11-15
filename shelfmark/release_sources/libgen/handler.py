@@ -54,7 +54,7 @@ class LibgenHandler(DownloadHandler):
 
             # source_id was namespaced "libgen:<md5>" to avoid a queue-key collision with
             # direct_download; strip it back to the bare (lowercase) md5 the download page expects.
-            md5 = task.task_id.split(":", 1)[-1].lower()
+            md5 = task.release_id.split(":", 1)[-1].lower()
 
             if config.get("FILE_ORGANIZATION", "rename") == "none":
                 book_name = f"{md5}.{normalize_format(task.format) or 'bin'}"

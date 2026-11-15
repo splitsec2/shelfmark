@@ -57,7 +57,7 @@ class WebshareHandler(DownloadHandler):
         status_callback: Callable[[str, str | None], None],
     ) -> str | None:
         """Resolve a download link for the file and stream it into TMP_DIR."""
-        ident = task.task_id.split(":", 1)[-1]
+        ident = task.release_id.split(":", 1)[-1]
         book_path: Path | None = None
         try:
             if cancel_flag.is_set():

@@ -26,10 +26,11 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from shelfmark.core import search_deadline
+from shelfmark.core import library_index, search_deadline
 from shelfmark.core.config import config as app_config
+from shelfmark.core.hardcover_sync import PERSONAL_SYNC_ORIGIN
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import QueueStatus
+from shelfmark.core.models import ACTIVE_QUEUE_STATUSES, QueueStatus
 from shelfmark.core.release_search import search_source_releases
 from shelfmark.core.request_helpers import (
     coerce_bool,
@@ -744,8 +745,10 @@ def recent_failed_releases(
         conn = sqlite3.connect(db_path)
         try:
             rows = conn.execute(
-                "SELECT task_id, source, final_status, status_message FROM download_history "
-                "WHERE COALESCE(terminal_at, queued_at) >= ?",
+                "SELECT COALESCE(json_extract(retry_payload, '$.source_id'), task_id), "
+                "source, final_status, status_message FROM download_history "
+                "WHERE COALESCE(terminal_at, queued_at) >= ? "
+                "ORDER BY COALESCE(terminal_at, queued_at) DESC, id DESC",
                 (since,),
             ).fetchall()
         finally:
@@ -754,16 +757,17 @@ def recent_failed_releases(
         logger.debug("auto-download: could not read recent failed releases: %s", exc)
         return frozenset()
     failed: set[tuple[str, str]] = set()
-    delivered: set[tuple[str, str]] = set()
-    for task_id, source, final_status, message in rows:
-        key = (str(source), str(task_id))
-        if final_status == "complete":
-            delivered.add(key)
-        elif final_status in ("cancelled", "error") and not str(message or "").lower().startswith(
+    seen: set[tuple[str, str]] = set()
+    for release_id, source, final_status, message in rows:
+        key = (str(source), str(release_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        if final_status in ("cancelled", "error") and not str(message or "").lower().startswith(
             _NOT_THE_RELEASES_FAULT
         ):
             failed.add(key)
-    return frozenset(failed - delivered)
+    return frozenset(failed)
 
 
 def recent_dead_releases(
@@ -783,7 +787,8 @@ def recent_dead_releases(
         conn = sqlite3.connect(db_path)
         try:
             rows = conn.execute(
-                "SELECT task_id, source, final_status, status_message FROM download_history "
+                "SELECT COALESCE(json_extract(retry_payload, '$.source_id'), task_id), "
+                "source, final_status, status_message FROM download_history "
                 "WHERE source != 'slskd' AND COALESCE(terminal_at, queued_at) >= ?",
                 (since,),
             ).fetchall()
@@ -1494,6 +1499,46 @@ def query_variants(book: BookMetadata) -> list[tuple[str, str]]:
     return variants[:MAX_QUERY_VARIANTS]
 
 
+def _wait_for_shared_library(
+    user_db: UserDB,
+    request_id: int,
+    book: BookMetadata,
+    content_type: str,
+) -> bool:
+    """Wait for the same book and format while delivery or library indexing is in progress."""
+    from shelfmark.core.queue import book_queue
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=library_index.CACHE_TTL_SECONDS)
+    try:
+        conn = sqlite3.connect(user_db.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT h.task_id, h.final_status, r.content_type "
+                "FROM download_history AS h JOIN download_requests AS r ON r.id = h.request_id "
+                "WHERE r.id != ? AND json_extract(r.book_data, '$.provider') = ? "
+                "AND CAST(COALESCE(json_extract(r.book_data, '$.provider_id'), "
+                "json_extract(r.book_data, '$.id')) AS TEXT) = ? "
+                "AND (h.final_status = 'active' OR (h.final_status = 'complete' "
+                "AND julianday(h.terminal_at) > julianday(?)))",
+                (request_id, book.provider, str(book.provider_id), cutoff.isoformat()),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.debug("auto-download: could not check outstanding deliveries: %s", exc)
+        return False
+
+    for task_id, status, acquired_format in rows:
+        if normalize_content_type(acquired_format) != content_type:
+            continue
+        if status == "complete":
+            return True
+        live_status = book_queue.get_task_status(task_id)
+        if live_status in ACTIVE_QUEUE_STATUSES or live_status == QueueStatus.COMPLETE:
+            return True
+    return False
+
+
 def auto_download_request(
     user_db: UserDB,
     request_row: dict[str, Any],
@@ -1547,11 +1592,17 @@ def auto_download_request(
     if book is None:
         return AutoDownloadOutcome(request_id, "skipped", "book not found in provider")
 
-    # Final guard: skip if the book is already in a library that is checked for this content type.
-    from shelfmark.core import library_index
+    shared_only = False
+    if provider_name == "hardcover":
+        owner = user_db.get_user(user_id=int(request_row["user_id"]))
+        shared_only = book_data.get("sync_origin") == PERSONAL_SYNC_ORIGIN or (
+            owner is not None and owner.get("role") != "admin"
+        )
 
     try:
-        in_library = library_index.is_in_library(book, content_type, strict=True)
+        in_library = library_index.is_in_library(
+            book, content_type, strict=True, shared_only=shared_only
+        )
     except library_index.LibraryUnavailableError as exc:
         # Unattended: do not download blind. The request stays pending for the next cycle.
         logger.warning(
@@ -1584,6 +1635,11 @@ def auto_download_request(
             book.title,
         )
         return AutoDownloadOutcome(request_id, "in_library", "already in library; closed")
+
+    if library_index.has_shared_library(content_type) and _wait_for_shared_library(
+        user_db, request_id, book, content_type
+    ):
+        return AutoDownloadOutcome(request_id, "skipped", "waiting for shared library delivery")
 
     audiobook_formats = _audiobook_formats()
     ebook_formats = _ebook_formats()

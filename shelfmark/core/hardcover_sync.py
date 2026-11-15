@@ -7,21 +7,24 @@ carry full metadata incl. covers) and the request-service validation/dedup path.
 
 from __future__ import annotations
 
-import sqlite3
-from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from shelfmark.core import library_index
 from shelfmark.core.config import config as app_config
-from shelfmark.core.download_history_service import ACTIVE_DOWNLOAD_STATUS
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_policy import normalize_content_type
+from shelfmark.core.request_helpers import (
+    load_users_request_policy_settings,
+    normalize_optional_text,
+)
+from shelfmark.core.request_policy import (
+    merge_request_policy_settings,
+    normalize_content_type,
+    pending_request_limit,
+)
+from shelfmark.core.user_settings_overrides import PERSONAL_HARDCOVER_TOKEN_KEY
 from shelfmark.core.utils import transform_cover_url
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from shelfmark.core.user_db import UserDB
     from shelfmark.metadata_providers import BookMetadata
 
@@ -29,45 +32,39 @@ logger = setup_logger(__name__)
 
 # Hardcover status_id -> shelf. Default sync target is "Want to Read" (1).
 DEFAULT_SYNC_STATUSES = ("1",)
+PERSONAL_SYNC_ORIGIN = "hardcover_personal_sync"
 _PAGE_LIMIT = 25  # Hardcover API page size.
 _MAX_PAGES = 40  # Safety bound (~1000 books) so a bad response can't loop forever.
 
 
-def _configured_token(user_id: int | None = None) -> str:
-    """Token for this sync: the user's own if they connected one, else the app-level token.
-
-    ``HARDCOVER_SYNC_TOKEN`` is user overridable, so passing a user id resolves their
-    value first and falls back to the global one. Without a user id this is the
-    single-account behaviour it has always had.
-    """
-    token = app_config.get("HARDCOVER_SYNC_TOKEN", "", user_id=user_id) or app_config.get(
-        "HARDCOVER_API_KEY", "", user_id=user_id
-    )
+def _configured_token() -> str:
+    """Read the deployment's sync credential, falling back to the metadata API key."""
+    token = app_config.get("HARDCOVER_SYNC_TOKEN", "") or app_config.get("HARDCOVER_API_KEY", "")
     return str(token or "").strip()
 
 
 def has_app_level_token() -> bool:
-    """Whether the app-level pass has a token to sync with (no user id, no user override)."""
+    """Whether the instance has a credential for its own sync pass."""
     return bool(_configured_token())
 
 
-def _user_token(user_id: int) -> str:
-    """The token this user connected themselves, ignoring the app-level fallback."""
-    token = app_config.get_user_override("HARDCOVER_SYNC_TOKEN", user_id=user_id)
-    return str(token or "").strip()
+def _user_token(user_db: UserDB, user_id: int) -> str:
+    """Read the personal credential directly from the user's settings."""
+    return (
+        normalize_optional_text(
+            user_db.get_user_settings(user_id).get(PERSONAL_HARDCOVER_TOKEN_KEY)
+        )
+        or ""
+    )
 
 
 def users_with_hardcover_token(user_db: UserDB) -> list[int]:
     """Ids of users who connected their own Hardcover token, lowest id first."""
-    user_ids: list[int] = []
-    for user in user_db.list_users():
-        raw_id = user.get("id")
-        if raw_id is None:
-            continue
-        user_id = int(raw_id)
-        if _user_token(user_id):
-            user_ids.append(user_id)
-    return sorted(user_ids)
+    return sorted(
+        int(user["id"])
+        for user in user_db.list_users()
+        if user.get("id") is not None and _user_token(user_db, int(user["id"]))
+    )
 
 
 def _configured_statuses() -> list[int]:
@@ -98,21 +95,16 @@ def _configured_content_types() -> list[str]:
     return list(_CONTENT_TYPES.get(raw.strip().lower(), _CONTENT_TYPES[DEFAULT_SYNC_CONTENT_TYPE]))
 
 
-def _build_provider(user_id: int | None = None) -> Any | None:
-    """Provider for one pass: a user's own token only, or the app-level token without an id.
-
-    A per-user pass never falls back to the app-level token, so a user who removed theirs
-    while a cycle was running is not given requests from the shared account's shelf.
-    """
+def _build_provider(token: str) -> Any | None:
+    """Build a provider scoped to the credential selected for this pass."""
     from shelfmark.metadata_providers import get_provider
 
-    token = _user_token(user_id) if user_id is not None else _configured_token()
     if not token:
         logger.warning("hardcover-sync: no Hardcover token configured")
         return None
-    provider = get_provider("hardcover", api_key=token)
+    provider = get_provider("hardcover", api_key=token, for_sync=True)
     if not provider.is_available():
-        logger.warning("hardcover-sync: Hardcover provider unavailable (bad token?)")
+        logger.warning("hardcover-sync: Hardcover provider unavailable")
         return None
     return provider
 
@@ -123,7 +115,6 @@ def _blocked_content_types(user_db: UserDB, user_id: int) -> set[str]:
     An admin is not held to the policy. Requests created here skip the request routes, and
     auto-download later approves them, so a blocked type has to be left out at this point.
     """
-    from shelfmark.core.request_helpers import load_users_request_policy_settings
     from shelfmark.core.request_policy import PolicyMode, resolve_policy_mode
 
     user = user_db.get_user(user_id=user_id)
@@ -158,7 +149,9 @@ def _primary_author(book: BookMetadata) -> str:
     return "Unknown"
 
 
-def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
+def _book_to_book_data(
+    book: BookMetadata, content_type: str, *, personal: bool = False
+) -> dict[str, Any]:
     book_data: dict[str, Any] = {
         "title": book.title,
         "author": _primary_author(book),
@@ -166,6 +159,8 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
         "provider_id": str(book.provider_id),
         "content_type": content_type,
     }
+    if personal:
+        book_data["sync_origin"] = PERSONAL_SYNC_ORIGIN
     # Proxy the cover the same way search results are, so the row is ready for the UI.
     if book.cover_url:
         book_data["preview"] = transform_cover_url(book.cover_url, f"hardcover_{book.provider_id}")
@@ -176,13 +171,10 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
     return book_data
 
 
-def _existing_request_keys(user_db: UserDB, user_id: int | None = None) -> set[tuple[str, str]]:
+def _existing_request_keys(user_db: UserDB, user_id: int) -> set[tuple[str, str]]:
     """``(hardcover id, content_type)`` pairs already requested, in any status.
 
-    Other providers' ids are not counted, so one that happens to equal a Hardcover id
-    cannot skip a book. Scoped to one owner when syncing that user's own shelf, matching
-    the per-user duplicate check in requests_service, so one user's request does not
-    silently swallow another user's. The app-level path stays instance-wide.
+    An owner's existing request counts in every status and only for its own format.
     """
     keys: set[tuple[str, str]] = set()
     for row in user_db.list_requests(user_id=user_id):
@@ -197,91 +189,6 @@ def _existing_request_keys(user_db: UserDB, user_id: int | None = None) -> set[t
                 )
                 keys.add((str(pid), content_type))
     return keys
-
-
-# An "active" history row older than this is a download the app lost track of (the
-# process died before the row was finalised), not one still running.
-_ACTIVE_DOWNLOAD_MAX_AGE = timedelta(hours=24)
-
-
-def _history_timestamp(value: object) -> datetime | None:
-    """A stored history stamp (SQLite's default or ISO with an offset) as an aware datetime."""
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).strip())
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-@contextmanager
-def _history_connection(db_path: str | None) -> Iterator[sqlite3.Connection | None]:
-    """One read connection to the history for a whole sync pass, None when there is none.
-
-    The history check runs for every book on the shelf, so opening a connection per book
-    is a lot of work for a slow disk or a small board.
-    """
-    conn: sqlite3.Connection | None = None
-    if db_path:
-        try:
-            conn = sqlite3.connect(db_path)
-        except sqlite3.Error as exc:
-            logger.debug("hardcover-sync: history dedup connection failed: %s", exc)
-    try:
-        yield conn
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _already_downloaded(
-    conn: sqlite3.Connection | None,
-    provider: str,
-    provider_id: str,
-    content_type: str,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    """True when a request for this book and format has a download finished or running.
-
-    Keyed on ``download_history.request_id`` and the request's ``book_data``: the history
-    row itself holds the release's title and the source's own content label (Anna's
-    Archive writes "book (fiction)"), neither of which compares to the book. The format
-    is the request's, normalised the way requests_service stores it.
-
-    The request-key check in front of this covers every request the sync can see, so
-    this only decides anything for a request it cannot: another user's, on a per-user
-    sync. Failed and cancelled downloads don't count, and neither does an active row
-    older than :data:`_ACTIVE_DOWNLOAD_MAX_AGE`, so a download that broke or was lost
-    does not hold the book back for good.
-    """
-    if conn is None:
-        return False
-    wanted = normalize_content_type(content_type)
-    cutoff = (now or datetime.now(UTC)) - _ACTIVE_DOWNLOAD_MAX_AGE
-    try:
-        rows = conn.execute(
-            "SELECT h.final_status, h.terminal_at, r.content_type "
-            "FROM download_history AS h "
-            "JOIN download_requests AS r ON r.id = h.request_id "
-            "WHERE h.final_status IN ('complete', ?) "
-            "AND json_extract(r.book_data, '$.provider') = ? "
-            "AND CAST(json_extract(r.book_data, '$.provider_id') AS TEXT) = ?",
-            (ACTIVE_DOWNLOAD_STATUS, provider, str(provider_id)),
-        ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug("hardcover-sync: history dedup query failed: %s", exc)
-        return False
-    for final_status, terminal_at, request_content_type in rows:
-        if normalize_content_type(request_content_type) != wanted:
-            continue
-        if final_status == ACTIVE_DOWNLOAD_STATUS:
-            stamp = _history_timestamp(terminal_at)
-            if stamp is None or stamp < cutoff:
-                continue
-        return True
-    return False
 
 
 def _fetch_status_books(provider: Any, status_id: int) -> tuple[list[BookMetadata], bool]:
@@ -307,7 +214,6 @@ def _fetch_status_books(provider: Any, status_id: int) -> tuple[list[BookMetadat
 def sync_wishlist(
     user_db: UserDB,
     *,
-    db_path: str | None = None,
     user_id: int | None = None,
 ) -> dict[str, int]:
     """Sync configured Hardcover shelves into pending requests.
@@ -323,9 +229,6 @@ def sync_wishlist(
     """
     summary = {"added": 0, "skipped": 0, "in_library": 0, "errors": 0}
 
-    # A caller-supplied id is the user whose own shelf this is, so their token and
-    # their existing requests are the ones that matter. Without one this is the
-    # app-level pass, owned by an admin and deduped instance-wide as before.
     per_user = user_id is not None
     if user_id is None:
         user_id = resolve_request_owner(user_db)
@@ -334,12 +237,13 @@ def sync_wishlist(
         summary["errors"] += 1
         return summary
 
-    if per_user and not _user_token(user_id):
+    token = _user_token(user_db, user_id) if per_user else _configured_token()
+    if per_user and not token:
         # Their token went between the account list being read and this pass.
         logger.info("hardcover-sync: user %s no longer has a token of their own; skipped", user_id)
         return summary
 
-    provider = _build_provider(user_id if per_user else None)
+    provider = _build_provider(token)
     if provider is None:
         summary["errors"] += 1
         return summary
@@ -350,85 +254,91 @@ def sync_wishlist(
     try:
         for content_type in content_types:
             if content_type not in blocked_types:
-                library_index.require_ready(content_type)
+                library_index.require_ready(content_type, shared_only=per_user)
     except library_index.LibraryUnavailableError as exc:
         # Requesting now would queue books the library may already hold.
         logger.warning("hardcover-sync: %s; skipping this sync", exc)
         summary["errors"] += 1
         return summary
-    known_requests = _existing_request_keys(user_db, user_id if per_user else None)
+    known_requests = _existing_request_keys(user_db, user_id)
+    max_pending = None
+    if per_user:
+        max_pending = pending_request_limit(
+            merge_request_policy_settings(
+                load_users_request_policy_settings(), user_db.get_user_settings(user_id)
+            )
+        )
 
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
-    with _history_connection(db_path) as history:
-        for status_id in _configured_statuses():
-            shelf, fetch_failed = _fetch_status_books(provider, status_id)
-            if fetch_failed:
-                summary["errors"] += 1
-            for book in shelf:
-                provider_id = str(book.provider_id)
-                author = _primary_author(book)
+    for status_id in _configured_statuses():
+        shelf, fetch_failed = _fetch_status_books(provider, status_id)
+        if fetch_failed:
+            summary["errors"] += 1
+        for book in shelf:
+            provider_id = str(book.provider_id)
+            author = _primary_author(book)
 
-                for content_type in content_types:
-                    if content_type in blocked_types:
+            for content_type in content_types:
+                if content_type in blocked_types:
+                    summary["skipped"] += 1
+                    continue
+                if (provider_id, content_type) in known_requests:
+                    summary["skipped"] += 1
+                    continue
+                if library_index.is_in_library(
+                    book, content_type, strict=True, shared_only=per_user
+                ):
+                    summary["in_library"] += 1
+                    logger.info(
+                        "hardcover-sync: '%s' (%s) already in library; skipping",
+                        book.title,
+                        content_type,
+                    )
+                    continue
+
+                try:
+                    create_request(
+                        user_db,
+                        user_id=user_id,
+                        source_hint=None,
+                        content_type=content_type,
+                        request_level="book",
+                        policy_mode="request_book",
+                        book_data=_book_to_book_data(book, content_type, personal=per_user),
+                        max_pending_per_user=max_pending,
+                        note=None,
+                    )
+                except RequestServiceError as exc:
+                    # Duplicate / max-pending / validation: treat as skip, not failure.
+                    if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
                         summary["skipped"] += 1
-                        continue
-                    if (provider_id, content_type) in known_requests:
-                        summary["skipped"] += 1
-                        continue
-                    if _already_downloaded(history, book.provider, provider_id, content_type):
-                        summary["skipped"] += 1
-                        continue
-                    if library_index.is_in_library(book, content_type):
-                        summary["in_library"] += 1
-                        logger.info(
-                            "hardcover-sync: '%s' (%s) already in library; skipping",
+                    else:
+                        logger.warning(
+                            "hardcover-sync: could not add '%s' (%s): %s",
                             book.title,
                             content_type,
-                        )
-                        continue
-
-                    try:
-                        create_request(
-                            user_db,
-                            user_id=user_id,
-                            source_hint=None,
-                            content_type=content_type,
-                            request_level="book",
-                            policy_mode="request_book",
-                            book_data=_book_to_book_data(book, content_type),
-                            note=None,
-                        )
-                    except RequestServiceError as exc:
-                        # Duplicate / max-pending / validation: treat as skip, not failure.
-                        if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
-                            summary["skipped"] += 1
-                        else:
-                            logger.warning(
-                                "hardcover-sync: could not add '%s' (%s): %s",
-                                book.title,
-                                content_type,
-                                exc,
-                            )
-                            summary["errors"] += 1
-                        continue
-                    except Exception:
-                        logger.exception(
-                            "hardcover-sync: unexpected error adding '%s' (%s)",
-                            book.title,
-                            content_type,
+                            exc,
                         )
                         summary["errors"] += 1
-                        continue
-
-                    known_requests.add((provider_id, content_type))
-                    summary["added"] += 1
-                    logger.info(
-                        "hardcover-sync: added %s request for '%s' by %s",
-                        content_type,
+                    continue
+                except Exception:
+                    logger.exception(
+                        "hardcover-sync: unexpected error adding '%s' (%s)",
                         book.title,
-                        author,
+                        content_type,
                     )
+                    summary["errors"] += 1
+                    continue
+
+                known_requests.add((provider_id, content_type))
+                summary["added"] += 1
+                logger.info(
+                    "hardcover-sync: added %s request for '%s' by %s",
+                    content_type,
+                    book.title,
+                    author,
+                )
 
     logger.info("hardcover-sync complete: %s", summary)
     return summary

@@ -1,5 +1,6 @@
 """Hardcover.app metadata provider. Requires API key."""
 
+import hashlib
 import math
 import random
 import re
@@ -1128,10 +1129,15 @@ class HardcoverProvider(MetadataProvider):
         ),
     )
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, *, for_sync: bool = False) -> None:
         """Initialize provider with optional API key (falls back to config)."""
         raw_key = api_key or app_config.get("HARDCOVER_API_KEY", "")
         self.api_key = _normalize_hardcover_api_key(raw_key)
+        self._for_sync = for_sync
+        self._account_id: str | None = None
+        self._account_lookup_attempted = False
+        self._account_username: str | None = None
+        self._credential_key = hashlib.sha256(self.api_key.encode()).hexdigest()
         self.session = requests.Session()
         if self.api_key:
             self.session.headers.update(
@@ -1187,8 +1193,13 @@ class HardcoverProvider(MetadataProvider):
 
         return owner_username, slug
 
-    @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:list:id")
     def _fetch_list_books_by_id(self, list_id: int, page: int, limit: int) -> SearchResult:
+        return self._fetch_list_books_by_id_cached(list_id, self._credential_key, page, limit)
+
+    @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:list:id")
+    def _fetch_list_books_by_id_cached(
+        self, list_id: int, _credential_key: str, page: int, limit: int
+    ) -> SearchResult:
         """Fetch list books by unique Hardcover list ID."""
         if not self.api_key:
             return SearchResult(books=[], page=page, total_found=0, has_more=False)
@@ -1254,9 +1265,6 @@ class HardcoverProvider(MetadataProvider):
             source_title=source_title,
         )
 
-    @cacheable(
-        ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:list:slug"
-    )
     def _fetch_list_books(
         self, slug: str, owner_username: str | None, page: int, limit: int
     ) -> SearchResult:
@@ -1300,30 +1308,38 @@ class HardcoverProvider(MetadataProvider):
         return self._fetch_list_books_by_id(list_id, page, limit)
 
     def _resolve_current_user_id(self) -> str | None:
-        """Resolve current Hardcover user id from saved settings or API me query."""
-        connected_user_id = _get_connected_user_id()
-        if connected_user_id:
-            return connected_user_id
+        """Resolve the identity authenticated by this provider's own credential."""
+        if self._account_id is not None:
+            return self._account_id
 
-        result = self._execute_query("query { me { id, username } }", {})
-        if not result:
+        if self._for_sync and self._account_lookup_attempted:
+            msg = "Hardcover could not identify the sync account"
+            raise RuntimeError(msg)
+        self._account_lookup_attempted = True
+        result = self._execute_query(
+            "query { me { id, username } }", {}, raise_on_error=self._for_sync
+        )
+        me_data = result.get("me") if result else None
+        if isinstance(me_data, list):
+            me_data = me_data[0] if me_data else None
+        raw_id = me_data.get("id") if isinstance(me_data, dict) else None
+        if (
+            not isinstance(me_data, dict)
+            or not isinstance(raw_id, (str, int))
+            or not str(raw_id).strip()
+        ):
+            if self._for_sync:
+                msg = "Hardcover could not identify the sync account"
+                raise RuntimeError(msg)
             return None
 
-        me_data = result.get("me", {})
-        if isinstance(me_data, list) and me_data:
-            me_data = me_data[0]
-        if not isinstance(me_data, dict):
-            return None
-
-        user_id_raw = me_data.get("id")
-        if user_id_raw is None:
-            return None
-
-        user_id = str(user_id_raw)
-        username_raw = me_data.get("username")
-        username = str(username_raw).strip() if username_raw else _get_connected_username()
-        _save_connected_user(user_id, username)
-        return user_id
+        self._account_id = str(raw_id).strip()
+        self._account_username = normalize_optional_text(me_data.get("username"))
+        if not self._for_sync and self.api_key == _normalize_hardcover_api_key(
+            app_config.get("HARDCOVER_API_KEY", "")
+        ):
+            _save_connected_user(self._account_id, self._account_username)
+        return self._account_id
 
     def get_user_lists(self) -> list[dict[str, str]]:
         """Get authenticated user's own and followed Hardcover lists."""
@@ -1334,7 +1350,7 @@ class HardcoverProvider(MetadataProvider):
         if not connected_user_id:
             return self._fetch_user_lists()
 
-        return self._get_user_lists_cached(connected_user_id)
+        return self._get_user_lists_cached(connected_user_id, self._credential_key)
 
     def get_search_field_options(
         self,
@@ -1833,7 +1849,9 @@ class HardcoverProvider(MetadataProvider):
         return SearchResult(books=books, page=page, total_found=total_found, has_more=has_more)
 
     @cacheable(ttl=120, key_prefix="hardcover:user_lists")
-    def _get_user_lists_cached(self, _cache_user_id: str) -> list[dict[str, str]]:
+    def _get_user_lists_cached(
+        self, _cache_user_id: str, _credential_key: str
+    ) -> list[dict[str, str]]:
         """Return cached user lists keyed by Hardcover user id."""
         return self._fetch_user_lists()
 
@@ -1848,7 +1866,14 @@ class HardcoverProvider(MetadataProvider):
         if not connected_user_id:
             return SearchResult(books=[], page=page, total_found=0, has_more=False)
 
-        return self._fetch_user_books_by_status_cached(connected_user_id, status_id, page, limit)
+        try:
+            return self._fetch_user_books_by_status_cached(
+                connected_user_id, status_id, self._credential_key, page, limit
+            )
+        except RuntimeError, TypeError, ValueError:
+            if self._for_sync:
+                raise
+            return SearchResult(books=[], page=page, total_found=0, has_more=False)
 
     @cacheable(
         ttl_key="METADATA_CACHE_SEARCH_TTL",
@@ -1859,6 +1884,7 @@ class HardcoverProvider(MetadataProvider):
         self,
         _cache_user_id: str,
         status_id: int,
+        _credential_key: str,
         page: int,
         limit: int,
     ) -> SearchResult:
@@ -1878,17 +1904,16 @@ class HardcoverProvider(MetadataProvider):
                 "limit": limit,
                 "offset": offset,
             },
+            raise_on_error=True,
         )
-        if not result:
-            return SearchResult(books=[], page=page, total_found=0, has_more=False)
+        me_data = result.get("me") if result else None
+        if isinstance(me_data, list):
+            me_data = me_data[0] if me_data else None
+        if not isinstance(me_data, dict) or not isinstance(me_data.get("status_books"), list):
+            msg = "Hardcover returned an invalid status shelf"
+            raise TypeError(msg)
 
-        me_data = result.get("me", {})
-        if isinstance(me_data, list) and me_data:
-            me_data = me_data[0]
-        if not isinstance(me_data, dict):
-            return SearchResult(books=[], page=page, total_found=0, has_more=False)
-
-        status_books = me_data.get("status_books", [])
+        status_books = me_data["status_books"]
         aggregate_data = me_data.get("status_books_aggregate", {})
         aggregate = aggregate_data.get("aggregate", {}) if isinstance(aggregate_data, dict) else {}
         count_raw = aggregate.get("count", 0) if isinstance(aggregate, dict) else 0
@@ -1919,7 +1944,7 @@ class HardcoverProvider(MetadataProvider):
         # Build source URL for the status shelf
         source_url = None
         url_slug = HARDCOVER_STATUS_URL_SLUGS.get(status_id)
-        username = _get_connected_username()
+        username = self._account_username
         if url_slug and username:
             source_url = f"https://hardcover.app/@{username}/books/{url_slug}"
 
@@ -2369,14 +2394,16 @@ class HardcoverProvider(MetadataProvider):
         metadata_cache = get_metadata_cache()
 
         if connected_user_id:
-            metadata_cache.invalidate(cache_key("hardcover:user_lists", connected_user_id))
+            metadata_cache.invalidate_prefix(
+                cache_key("hardcover:user_lists", connected_user_id) + ":"
+            )
             for status_id in status_ids:
                 metadata_cache.invalidate_prefix(
-                    cache_key("hardcover:user_books:status", connected_user_id, status_id)
+                    cache_key("hardcover:user_books:status", connected_user_id, status_id) + ":"
                 )
 
         for list_id in list_ids:
-            metadata_cache.invalidate_prefix(cache_key("hardcover:list:id", list_id))
+            metadata_cache.invalidate_prefix(cache_key("hardcover:list:id", list_id) + ":")
 
     @staticmethod
     def _parse_prefixed_int(value: str, label: str = "target") -> int:
@@ -3231,6 +3258,11 @@ def _save_connected_user(user_id: str | None, username: str | None) -> None:
     from shelfmark.core.settings_registry import load_config_file, save_config_file
 
     config = load_config_file("hardcover")
+    if (
+        config.get("_connected_user_id") == user_id
+        and config.get("_connected_username") == username
+    ):
+        return
     if user_id:
         config["_connected_user_id"] = user_id
     else:
@@ -3250,15 +3282,6 @@ def _get_connected_username() -> str | None:
 
     config = load_config_file("hardcover")
     return config.get("_connected_username")
-
-
-def _get_connected_user_id() -> str | None:
-    """Get the stored connected Hardcover user id."""
-    from shelfmark.core.settings_registry import load_config_file
-
-    config = load_config_file("hardcover")
-    value = config.get("_connected_user_id")
-    return str(value) if value is not None else None
 
 
 # Hardcover sort options for settings UI

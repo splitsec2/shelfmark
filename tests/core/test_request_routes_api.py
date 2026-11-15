@@ -1962,11 +1962,13 @@ class TestRequestRoutes:
         assert fulfil_resp.json["status"] == "fulfilled"
 
         user_status = main_module.backend.queue_status(user_id=user["id"])
-        assert source_id in user_status["queued"]
-        assert user_status["queued"][source_id]["username"] == user["username"]
+        (task_id,) = user_status["queued"]
+        assert user_status["queued"][task_id]["username"] == user["username"]
+        assert user_status["queued"][task_id]["request_id"] == request_id
+        assert main_module.backend.book_queue.get_task(task_id).release_id == source_id
 
         other_status = main_module.backend.queue_status(user_id=other_user["id"])
-        assert source_id not in other_status["queued"]
+        assert task_id not in other_status["queued"]
 
 
 class TestRequestCreationEdgeCases:

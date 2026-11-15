@@ -303,7 +303,7 @@ def test_build_user_preferences_payload_masks_password_fields(monkeypatch):
         payload = build_user_preferences_payload(user_db, 7, "hardcover_sync")
 
     assert payload["userOverrides"] == {"HARDCOVER_SYNC_TOKEN": SECRET_PLACEHOLDER}
-    assert payload["globalValues"]["HARDCOVER_SYNC_TOKEN"] == SECRET_PLACEHOLDER
+    assert payload["globalValues"]["HARDCOVER_SYNC_TOKEN"] is None
     assert payload["effective"]["HARDCOVER_SYNC_TOKEN"] == {
         "value": SECRET_PLACEHOLDER,
         "source": "user_override",

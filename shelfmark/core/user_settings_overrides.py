@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # A client that sends it back unchanged on save means "keep what is stored"; the
 # real value is only available through an explicit reveal request.
 SECRET_PLACEHOLDER = "********"  # noqa: S105 - a mask, not a credential
+PERSONAL_HARDCOVER_TOKEN_KEY = "HARDCOVER_SYNC_TOKEN"  # noqa: S105 - a setting name
 
 
 def mask_secret_value(field: FieldBase, value: Any) -> Any:
@@ -103,7 +104,8 @@ def build_user_preferences_payload(
 
     With ``for_self_service`` the payload is meant for the user it describes:
     global values they did not set themselves are replaced with ``None`` unless
-    `is_global_value_visible_to_user` allows them. Admin callers get full data.
+    `is_global_value_visible_to_user` allows them. The personal Hardcover credential
+    has no instance fallback in either view.
     """
     from shelfmark.core.config import config as app_config
 
@@ -124,6 +126,18 @@ def build_user_preferences_payload(
 
     for key, field in ordered_fields:
         serialized = settings_registry.serialize_field(field, tab_name, include_value=False)
+        if key == PERSONAL_HARDCOVER_TOKEN_KEY:
+            # The instance field and the user's credential have separate lifecycles.
+            serialized["fromEnv"] = False
+            fields_payload.append(serialized)
+            value = user_settings.get(key)
+            global_values[key] = None
+            effective[key] = {
+                "value": mask_secret_value(field, value),
+                "source": "user_override" if value is not None else "default",
+            }
+            continue
+
         serialized["fromEnv"] = bool(
             field.env_supported and settings_registry.is_value_from_env(field)
         )

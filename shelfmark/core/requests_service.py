@@ -19,6 +19,7 @@ from shelfmark.core.request_validation import (
     validate_request_level_payload,
 )
 from shelfmark.core.status_messages import client_problem
+from shelfmark.core.user_db import PendingRequestLimitError
 
 MAX_REQUEST_NOTE_LENGTH = 1000
 MAX_REQUEST_JSON_BLOB_BYTES = 10 * 1024
@@ -322,16 +323,6 @@ def create_request(
         note=note,
     )
 
-    if max_pending_per_user is not None:
-        pending_count = user_db.count_user_pending_requests(user_id)
-        if pending_count >= max_pending_per_user:
-            msg = "Maximum pending requests reached for this user"
-            raise RequestServiceError(
-                msg,
-                status_code=409,
-                code="max_pending_reached",
-            )
-
     duplicate = _find_duplicate_pending_request(
         user_db,
         user_id=user_id,
@@ -348,7 +339,9 @@ def create_request(
         )
 
     try:
-        return user_db.create_request(**prepared_request)
+        return user_db.create_request(**prepared_request, max_pending_per_user=max_pending_per_user)
+    except PendingRequestLimitError as exc:
+        raise RequestServiceError(str(exc), status_code=409, code="max_pending_reached") from exc
     except (ValueError, TypeError) as exc:
         raise RequestServiceError(str(exc), status_code=400) from exc
 
@@ -364,7 +357,6 @@ def create_requests(
         raise RequestServiceError(msg, status_code=400)
 
     prepared_requests: list[dict[str, Any]] = []
-    pending_counts_by_user: dict[int, int] = {}
     seen_request_keys: set[tuple[int, str, str, str]] = set()
 
     for request in requests:
@@ -399,20 +391,6 @@ def create_requests(
             )
         seen_request_keys.add(request_key)
 
-        max_pending_per_user = request.get("max_pending_per_user")
-        if max_pending_per_user is not None:
-            existing_pending = pending_counts_by_user.get(user_id)
-            if existing_pending is None:
-                existing_pending = user_db.count_user_pending_requests(user_id)
-            if existing_pending >= max_pending_per_user:
-                msg = "Maximum pending requests reached for this user"
-                raise RequestServiceError(
-                    msg,
-                    status_code=409,
-                    code="max_pending_reached",
-                )
-            pending_counts_by_user[user_id] = existing_pending + 1
-
         duplicate = _find_duplicate_pending_request(
             user_db,
             user_id=user_id,
@@ -428,10 +406,13 @@ def create_requests(
                 code="duplicate_pending_request",
             )
 
+        prepared_request["max_pending_per_user"] = request.get("max_pending_per_user")
         prepared_requests.append(prepared_request)
 
     try:
         return user_db.create_requests(prepared_requests)
+    except PendingRequestLimitError as exc:
+        raise RequestServiceError(str(exc), status_code=409, code="max_pending_reached") from exc
     except ValueError as exc:
         raise RequestServiceError(str(exc), status_code=400) from exc
 

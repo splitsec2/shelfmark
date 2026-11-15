@@ -4,8 +4,10 @@ Two-stage architecture: handlers stage to TMP_DIR, orchestrator delivers to the 
 with archive extraction and custom script support.
 """
 
+import hashlib
 import os
 import random
+import re
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -236,6 +238,7 @@ def _build_retry_resolution_fields(
 # Sources whose source_id becomes a staging file name (the handlers use it as one when
 # FILE_ORGANIZATION is "none"), so it must not carry path components.
 _FILENAME_ID_SOURCES = frozenset({"direct_download", "libgen"})
+_REQUEST_TASK_ID = re.compile(r"[a-z_]+:request-\d+-[0-9a-f]{64}")
 
 
 def _source_id_is_unsafe_filename(source: str, source_id: object) -> bool:
@@ -259,7 +262,10 @@ def queue_release(
             logger.warning("Rejected queue request for unavailable source %s", source)
             return False, unavailable_message
 
-        if _source_id_is_unsafe_filename(source, release_data["source_id"]):
+        source_id = release_data["source_id"]
+        if not isinstance(source_id, str) or not source_id.strip():
+            return False, "Invalid release identifier"
+        if _source_id_is_unsafe_filename(source, source_id):
             logger.warning("Rejected queue request with unsafe source_id for %s", source)
             return False, "Invalid release identifier"
 
@@ -268,6 +274,12 @@ def queue_release(
         request_id: int | None = None
         if isinstance(raw_request_id, int) and raw_request_id > 0:
             request_id = raw_request_id
+        task_id = source_id
+        if request_id is not None:
+            digest = hashlib.sha256(source_id.encode()).hexdigest()
+            task_id = f"{source}:request-{request_id}-{digest}"
+        elif _REQUEST_TASK_ID.fullmatch(source_id):
+            return False, "Invalid release identifier"
         search_mode = _parse_release_search_mode(release_data.get("search_mode"))
 
         # Get author, year, preview, and content_type from top-level (preferred) or extra (fallback)
@@ -322,8 +334,9 @@ def queue_release(
 
         # Create a source-agnostic download task from release data
         task = DownloadTask(
-            task_id=release_data["source_id"],
+            task_id=task_id,
             source=source,
+            source_id=source_id,
             title=release_data.get("title", "Unknown"),
             author=author,
             year=year,
@@ -558,6 +571,7 @@ def serialize_task_for_retry(task: DownloadTask) -> dict[str, Any]:
 
     return {
         "task_id": getattr(task, "task_id", None),
+        "source_id": getattr(task, "source_id", None),
         "source": getattr(task, "source", None),
         "title": getattr(task, "title", None),
         "author": getattr(task, "author", None),
@@ -621,6 +635,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
     return DownloadTask(
         task_id=task_id,
         source=source,
+        source_id=normalize_optional_text(payload.get("source_id")),
         title=title,
         author=normalize_optional_text(payload.get("author")),
         year=normalize_optional_text(payload.get("year")),
@@ -1228,6 +1243,18 @@ def _source_of(task_id: str) -> str | None:
     return task.source if task is not None else None
 
 
+def _can_start_download(
+    task: DownloadTask,
+    *,
+    running_releases: set[tuple[str, str] | None],
+    running_by_source: dict[str | None, int],
+    per_source: int,
+) -> bool:
+    return (task.source, task.release_id) not in running_releases and (
+        not per_source or _source_has_room(task, running=running_by_source, limit=per_source)
+    )
+
+
 def concurrent_download_loop() -> None:
     """Run the main concurrent download coordinator."""
     max_workers = normalize_positive_int(config.MAX_CONCURRENT_DOWNLOADS) or 1
@@ -1240,7 +1267,7 @@ def concurrent_download_loop() -> None:
         logger.info("Starting concurrent download loop with %s workers", max_workers)
 
     with ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="Download") as executor:
-        active_futures: dict[Future, tuple[str, Event]] = {}  # Track active download futures
+        active_futures: dict[Future, tuple[str, Event, tuple[str, str] | None]] = {}
         stalled_tasks: set[str] = set()  # Track tasks already cancelled due to stall
         consecutive_errors = 0
 
@@ -1249,7 +1276,7 @@ def concurrent_download_loop() -> None:
                 # Clean up completed futures
                 completed_futures = [f for f in active_futures if f.done()]
                 for future in completed_futures:
-                    task_id, cancel_flag = active_futures.pop(future)
+                    task_id, cancel_flag, _release = active_futures.pop(future)
                     stalled_tasks.discard(task_id)
                     if future.cancelled():
                         _cleanup_progress_tracking(task_id)
@@ -1295,7 +1322,7 @@ def concurrent_download_loop() -> None:
                 current_time = time.time()
                 candidates = [
                     task_id
-                    for _future, (task_id, _cancel_flag) in list(active_futures.items())
+                    for task_id, _cancel_flag, _release in active_futures.values()
                     if task_id not in stalled_tasks
                 ]
                 for task_id in _find_stalled_tasks(candidates, current_time):
@@ -1305,17 +1332,22 @@ def concurrent_download_loop() -> None:
                 # Start new downloads if we have capacity
                 while len(active_futures) < pool_size:
                     running_by_source: dict[str | None, int] = {}
+                    running_releases = {release for _, _, release in active_futures.values()}
                     if per_source:
-                        for running_id, _flag in active_futures.values():
+                        for running_id, _flag, _release in active_futures.values():
                             key = _working_source_of(running_id)
                             if key is not None:
                                 running_by_source[key] = running_by_source.get(key, 0) + 1
-                    accept = (
-                        partial(_source_has_room, running=running_by_source, limit=per_source)
-                        if per_source
-                        else None
+
+                    accept = partial(
+                        _can_start_download,
+                        running_releases=running_releases,
+                        running_by_source=running_by_source,
+                        per_source=per_source,
                     )
-                    next_download = book_queue.get_next(accept) if accept else book_queue.get_next()
+                    next_download = (
+                        book_queue.get_next(accept) if active_futures else book_queue.get_next()
+                    )
                     if not next_download:
                         break
 
@@ -1335,8 +1367,10 @@ def concurrent_download_loop() -> None:
                         time.sleep(stagger_delay)
 
                     # Submit download job to thread pool
+                    task = book_queue.get_task(task_id)
+                    release = (task.source, task.release_id) if task is not None else None
                     future = executor.submit(_process_single_download, task_id, cancel_flag)
-                    active_futures[future] = (task_id, cancel_flag)
+                    active_futures[future] = (task_id, cancel_flag, release)
 
                 # Brief sleep to prevent busy waiting
                 time.sleep(main_loop_sleep_time)

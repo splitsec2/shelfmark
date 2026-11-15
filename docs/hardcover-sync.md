@@ -12,16 +12,16 @@ On a schedule, Shelfmark reads the selected Hardcover shelf (by default **Want t
 
 A book is skipped when:
 
-- a request with the same Hardcover book id already exists, in any status
-- a request for the same Hardcover book and format, by any user, has a download in the history that finished or is still running (an unfinished download older than a day no longer counts as running)
-- the library check (below) says you already own it
-- a pending request with the same title, author, and content type already exists
+- the same user has requested that Hardcover book and format, in any status
+- an eligible library already holds the book in that format
+- the same user has a pending request with the same title, author, and content type
+- the personal account's owner has reached their pending-request limit
 
 ### Automatic downloads
 
 When enabled, each pending request that came from Hardcover is searched across your release sources in the priority order configured for its content type (audiobook requests use the audiobook list, ebook requests the ebook list). The first source that yields a **strict match** wins, and the best candidate from that source is queued through the normal request fulfilment path, so it appears in the activity view and download history exactly like a request an admin approved.
 
-Automatic downloads act for an admin, so they only approve what the request's owner could have downloaded without asking. Synced requests belong to an admin and are always searched. A request another user made is searched only on the release sources where their request policy (including any per-user override) resolves to **Download**, and only while requests are turned on for them; with requests off they download directly anyway. A request whose policy needs approval, or blocks that content type, is left pending for an admin, untouched, like any other request awaiting review. A failed download is only reopened for a retry on the same terms.
+Automatic downloads act for an admin, so they only approve what the request's owner could have downloaded without asking. Requests from the instance token belong to an admin and are always searched. A request owned by a non-admin is searched only on the release sources where their request policy (including any per-user override) resolves to **Download**, and only while requests are turned on for them; with requests off they download directly anyway. A request whose policy needs approval, or blocks that content type, is left pending for an admin, untouched, like any other request awaiting review. A failed download is only reopened for a retry on the same terms.
 
 A release is a strict match only when all of the following hold:
 
@@ -62,33 +62,35 @@ A store result counts as the book when its title matches the request's once both
 
 ### Library check
 
-Both shelf sync and automatic downloads ask the libraries you have enabled under [Library Check](library-check.md) whether the book is already there, for the content type being requested, and skip it if so. There is no separate switch on this tab. A library that is not enabled, or that does not hold the requested content type, never causes a skip.
+Shelf sync and automatic downloads check enabled [libraries](library-check.md) for the requested format. For personal shelves and non-admin Hardcover requests, only libraries marked **Everyone can access this library** count. Leave that option off for libraries with restricted access. Download history by itself cannot tell whether a reader received a copy.
+
+When a shared library is configured for the format and another request is downloading the same book, automatic downloads keep the waiting request pending. A successful delivery gives the library up to ten minutes to index the book. On a later pass a library match closes the waiting request. If the download failed or the library still has no match after the wait, the request can proceed through its owner's delivery settings.
 
 The check **fails closed** here: if an enabled library cannot be read and has not been read before, the sync cycle is skipped and an automatic download is held, and the request stays pending until the next cycle. Skipping is the safe side, because carrying on would request or download books the library already holds. Badges in search results still fail open.
 
 ## Per-user accounts
 
-Every user can connect their own Hardcover account instead of sharing one. The token
-field is user overridable, so it appears under **My Account, Hardcover Account** for each
-user. The section is shown exactly when **Enable scheduled sync** is on; it is not one of
+Every user can connect their own Hardcover account under **My Account, Hardcover Account**.
+Their credential is stored separately from the instance credential, including when Docker
+sets `HARDCOVER_SYNC_TOKEN`. The section is shown exactly when **Enable scheduled sync** is on; it is not one of
 the **Visible Self-Settings Sections** on the Users tab. While sync is off the section is
 hidden and a token a user already saved is kept. Scheduled runs don't sync while it is off;
 an admin can still sync users' accounts by hand with **Sync (all)**.
 
 When a user connects a token, each scheduled run syncs their shelf on their own token and
-the requests it creates are owned by them, deduplicated against their own requests rather
-than the whole instance. Accounts are synced one at a time, so a token that has expired or
-an API error on one account does not stop the others.
+the requests it creates are owned by them and subject to their **Users & Requests** pending
+limit. New books can be picked up on a later pass as slots open. Accounts sync one at a time,
+so a token that expires or an API error on one account does not stop the others.
 
-The app-level token still runs as its own pass afterwards, owned by the lowest-id admin,
-which is what a single-account install keeps doing with no change.
+The instance token runs as its own bulk-sync pass afterwards. The lowest-id admin owns
+those requests.
 
 ## Settings
 
 | Key | Label | Default | Notes |
 |-----|-------|---------|-------|
 | `HARDCOVER_SYNC_ENABLED` | Enable scheduled sync | Off | Runs shelf sync on the interval below |
-| `HARDCOVER_SYNC_TOKEN` | Hardcover API Token | — | Leave blank to reuse the Hardcover metadata provider's token. Each user can connect their own account instead, see [Per-user accounts](#per-user-accounts) |
+| `HARDCOVER_SYNC_TOKEN` | Hardcover API Token | — | Leave blank to reuse the Hardcover metadata provider's token. This setting is for the instance account. Users connect their own accounts in My Account |
 | `HARDCOVER_SYNC_STATUSES` | Shelves to sync | Want to Read | Hardcover reading status to pull from |
 | `HARDCOVER_SYNC_CONTENT_TYPE` | Request as | Audiobooks | `Audiobooks`, `Ebooks`, or `Ebooks and audiobooks` — the last creates one request of each per shelf book, each checked against its own library |
 | `HARDCOVER_SYNC_INTERVAL` | Sync interval | 6 | Combined with the unit below |
@@ -132,4 +134,4 @@ Only one run happens at a time. If a scheduled cycle is in progress, either sync
 
 **Books you own keep being added** — enable the library check for the format you request (see [Library Check](library-check.md)) and use its test button. A library that cannot be read shows up in the log as a skipped cycle.
 
-**Too many requests at once** — the first sync of a large shelf creates one request per book, and the per-user pending limit from **Users & Requests** does not apply to synced requests, including those from a user's own account. Start with a shelf you are happy to see in the queue in full.
+**Too many requests at once** — a personal sync fills the owner's available pending slots. The instance account is intended for bulk sync, so start it with a shelf you are happy to see in the queue in full.

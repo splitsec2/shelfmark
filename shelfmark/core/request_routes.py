@@ -16,7 +16,6 @@ from shelfmark.core.notifications import (
 )
 from shelfmark.core.request_helpers import (
     coerce_bool,
-    coerce_int,
     emit_ws_event,
     load_users_request_policy_settings,
     normalize_optional_text,
@@ -32,6 +31,7 @@ from shelfmark.core.request_policy import (
     normalize_content_type,
     normalize_source,
     parse_policy_mode,
+    pending_request_limit,
     resolve_policy_mode,
 )
 from shelfmark.core.request_validation import RequestStatus
@@ -374,12 +374,7 @@ def _prepare_request_create_arguments(
             code="requests_unavailable",
         )
 
-    max_pending = coerce_int(
-        effective.get("MAX_PENDING_REQUESTS_PER_USER"),
-        default=20,
-    )
-    max_pending = max(max_pending, 1)
-    max_pending = min(max_pending, 1000)
+    max_pending = pending_request_limit(effective)
     allow_notes = coerce_bool(effective.get("REQUESTS_ALLOW_NOTES"), default=True)
     note_value = data.get("note") if allow_notes else None
 
@@ -512,8 +507,10 @@ def _queue_prepared_download_submission(
         msg = "Requesting user not found"
         raise RequestServiceError(msg, status_code=404)
 
+    release_payload = dict(release_data)
+    release_payload.pop("_request_id", None)
     success, error = queue_release(
-        dict(release_data),
+        release_payload,
         0,
         user_id=create_args["user_id"],
         username=requester.get("username"),
