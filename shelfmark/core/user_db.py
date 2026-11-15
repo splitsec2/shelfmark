@@ -217,6 +217,24 @@ def sync_builtin_admin_user(
     logger.info("Created local admin user '%s' from builtin settings", normalized_username)
 
 
+class PendingRequestLimitError(ValueError):
+    """A write would exceed the request owner's pending quota."""
+
+
+def _count_pending(conn: sqlite3.Connection, user_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM download_requests WHERE user_id = ? AND status = 'pending'",
+        (user_id,),
+    ).fetchone()
+    return int(row[0])
+
+
+def _check_pending_limit(conn: sqlite3.Connection, user_id: int, limit: int | None) -> None:
+    if limit is not None and _count_pending(conn, user_id) >= limit:
+        msg = "Maximum pending requests reached for this user"
+        raise PendingRequestLimitError(msg)
+
+
 class UserDB:
     """Thread-safe SQLite user database."""
 
@@ -696,6 +714,7 @@ class UserDB:
         reviewed_at: str | None = None,
         delivery_state: str = DELIVERY_STATE_NONE,
         delivery_updated_at: str | None = None,
+        max_pending_per_user: int | None = None,
     ) -> dict[str, Any]:
         """Create a download request row and return the created record."""
         if not isinstance(book_data, dict):
@@ -716,6 +735,9 @@ class UserDB:
         with self._lock:
             conn = self._connect()
             try:
+                if max_pending_per_user is not None:
+                    conn.execute("BEGIN IMMEDIATE")
+                    _check_pending_limit(conn, user_id, max_pending_per_user)
                 created = self._insert_request(
                     conn,
                     user_id=user_id,
@@ -743,7 +765,13 @@ class UserDB:
         with self._lock:
             conn = self._connect()
             try:
-                created = [self._insert_request(conn, **request) for request in requests]
+                conn.execute("BEGIN IMMEDIATE")
+                created: list[dict[str, Any]] = []
+                for request in requests:
+                    fields = dict(request)
+                    limit = fields.pop("max_pending_per_user", None)
+                    _check_pending_limit(conn, fields["user_id"], limit)
+                    created.append(self._insert_request(conn, **fields))
                 conn.commit()
                 return created
             finally:
@@ -1192,10 +1220,6 @@ class UserDB:
         """Count pending requests for a specific user."""
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS count FROM download_requests WHERE user_id = ? AND status = 'pending'",
-                (user_id,),
-            ).fetchone()
-            return int(row["count"]) if row else 0
+            return _count_pending(conn, user_id)
         finally:
             conn.close()

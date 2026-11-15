@@ -49,8 +49,7 @@ export const UserHardcoverOverridesSection = ({
     placeholder: 'No account connected',
   };
   const tokenValue = toTextValue(userSettings[TOKEN_KEY]);
-  // The stored token is masked and the global one too, so the only sign of an own
-  // token is a non-empty value; comparing with the global value would say nothing.
+  // The personal token is masked when saved. A non-empty value means it is set.
   const hasOwnToken = tokenValue.length > 0;
   const isLocked = Boolean(tokenField.fromEnv);
 

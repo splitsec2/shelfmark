@@ -117,7 +117,7 @@ class QueueItem:
 class DownloadTask:
     """Mutable download task state tracked throughout the pipeline."""
 
-    task_id: str  # Unique ID (e.g., AA MD5 hash, Prowlarr GUID)
+    task_id: str  # Queue and history identity
     source: str  # Handler name ("direct_download", "prowlarr")
     title: str  # Display title for queue sidebar
 
@@ -204,6 +204,7 @@ class DownloadTask:
     # free slot. Such a task does no work yet, so it does not count against its source's limit.
     client_queued: bool = False
     staged_path: str | None = None
+    source_id: str | None = None  # Original release ID when task_id is request-scoped
 
     def __lt__(self, other: DownloadTask) -> bool:
         """Compare tasks for priority queue (lower priority number = higher precedence)."""
@@ -216,6 +217,11 @@ class DownloadTask:
         if self.download_path:
             return Path(self.download_path).name
         return build_filename(self.title, self.author, self.year, self.format)
+
+    @property
+    def release_id(self) -> str:
+        """Source identifier, including for tasks restored from older history."""
+        return self.source_id or self.task_id
 
 
 @dataclass

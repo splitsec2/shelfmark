@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
-_CACHE_TTL_SECONDS = 600  # Re-index a library at most every 10 minutes unless it changed.
+CACHE_TTL_SECONDS = 600  # Re-index a library at most every 10 minutes unless it changed.
 # After a failed index, answer from the stale cache for this long before trying again, so a
 # search page with dozens of results costs one failed attempt and one warning, not one each.
 _FAILURE_BACKOFF_SECONDS = 60
@@ -45,6 +45,7 @@ _FAILURE_BACKOFF_SECONDS = 60
 
 @dataclass
 class _CacheSlot:
+    configuration: object
     entries: list[LibraryEntry] | None = None
     fetched_at: float = 0.0
     fingerprint: object | None = None
@@ -55,13 +56,17 @@ _lock = threading.Lock()
 _cache: dict[str, _CacheSlot] = {}
 
 
-def _slot(provider_name: str) -> _CacheSlot:
+def _slot(provider: LibraryProvider) -> _CacheSlot:
+    configuration = provider.configuration_key()
     with _lock:
-        return _cache.setdefault(provider_name, _CacheSlot())
+        slot = _cache.get(provider.name)
+        if slot is None or slot.configuration != configuration:
+            slot = _CacheSlot(configuration)
+            _cache[provider.name] = slot
+        return slot
 
 
-def _store(provider_name: str, entries: list[LibraryEntry], fingerprint: object | None) -> None:
-    slot = _slot(provider_name)
+def _store(slot: _CacheSlot, entries: list[LibraryEntry], fingerprint: object | None) -> None:
     with _lock:
         slot.entries = entries
         slot.fetched_at = time.monotonic()
@@ -80,7 +85,7 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
     nothing cached the default is to fail open (no entries, so nothing counts as owned),
     which suits badges. ``strict`` raises instead, for callers that act on the answer.
     """
-    slot = _slot(provider.name)
+    slot = _slot(provider)
     with _lock:
         backing_off = slot.failed_at is not None and (
             time.monotonic() - slot.failed_at < _FAILURE_BACKOFF_SECONDS
@@ -98,7 +103,7 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
         fingerprint = provider.fingerprint()
         with _lock:
             cached = slot.entries
-            fresh = time.monotonic() - slot.fetched_at < _CACHE_TTL_SECONDS
+            fresh = time.monotonic() - slot.fetched_at < CACHE_TTL_SECONDS
             unchanged = fingerprint == slot.fingerprint
         if cached is not None and fresh and unchanged:
             return cached
@@ -128,18 +133,26 @@ def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[Lib
         logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
         return []
 
-    _store(provider.name, entries, fingerprint)
+    _store(slot, entries, fingerprint)
     logger.info("library check: indexed %d %s item(s)", len(entries), provider.display_name)
     return entries
 
 
-def _enabled_providers(content_type: str | None) -> list[LibraryProvider]:
+def _enabled_providers(
+    content_type: str | None, *, shared_only: bool = False
+) -> list[LibraryProvider]:
     return [
         provider
         for provider in all_providers()
         if provider.is_enabled()
+        and (not shared_only or provider.is_shared())
         and (content_type is None or content_type in provider.content_types)
     ]
+
+
+def has_shared_library(content_type: str) -> bool:
+    """Whether an enabled library of this format is marked accessible to all users."""
+    return bool(_enabled_providers(content_type, shared_only=True))
 
 
 def any_provider_enabled() -> bool:
@@ -208,17 +221,21 @@ def book_matches_entries(book: BookMetadata, entries: list[LibraryEntry]) -> boo
     return match_entries(book, entries) is not None
 
 
-def require_ready(content_type: str | None = None) -> None:
+def require_ready(content_type: str | None = None, *, shared_only: bool = False) -> None:
     """Raise LibraryUnavailableError unless every enabled library can be read (or is cached).
 
     ``content_type`` limits the check to the libraries holding that type.
     """
-    for provider in _enabled_providers(content_type):
+    for provider in _enabled_providers(content_type, shared_only=shared_only):
         _entries_for(provider, strict=True)
 
 
 def is_in_library(
-    book: BookMetadata, content_type: str | None = None, *, strict: bool = False
+    book: BookMetadata,
+    content_type: str | None = None,
+    *,
+    strict: bool = False,
+    shared_only: bool = False,
 ) -> bool:
     """True if an enabled library holding ``content_type`` already has ``book``.
 
@@ -227,7 +244,7 @@ def is_in_library(
     """
     return any(
         book_matches_entries(book, _entries_for(provider, strict=strict))
-        for provider in _enabled_providers(content_type)
+        for provider in _enabled_providers(content_type, shared_only=shared_only)
     )
 
 
@@ -268,5 +285,5 @@ def test_connection(provider_name: str, current_values: Mapping[str, Any] | None
         entries = provider.fetch_entries()
     except Exception as exc:  # noqa: BLE001 - surface any error to the user
         return {"success": False, "message": f"{provider.describe()}: {exc}"}
-    _store(provider.name, entries, fingerprint)
+    _store(_slot(provider), entries, fingerprint)
     return {"success": True, "message": f"{provider.describe()}: indexed {len(entries)} item(s)."}

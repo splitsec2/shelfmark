@@ -138,7 +138,7 @@ class NewznabHandler(ExternalClientHandler):
         task: DownloadTask,
         status_callback: Callable[[str, str | None], None],
     ) -> DownloadRequest | None:
-        result = get_release(task.task_id)
+        result = get_release(task.release_id)
         if not result:
             restored_request = self._restore_download_request_from_task(task)
             if restored_request is not None:
@@ -172,7 +172,7 @@ class NewznabHandler(ExternalClientHandler):
         )
 
     def _on_download_complete(self, task: DownloadTask) -> None:
-        remove_release(task.task_id)
+        remove_release(task.release_id)
 
     def cancel(self, task_id: str) -> bool:
         logger.debug("Cancel requested for Newznab task: %s", task_id)

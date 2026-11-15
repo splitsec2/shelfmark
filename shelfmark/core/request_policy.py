@@ -86,6 +86,13 @@ def filter_request_policy_settings(settings: Mapping[str, Any] | None) -> dict[s
     return {key: settings[key] for key in REQUEST_POLICY_KEYS if key in settings}
 
 
+def pending_request_limit(settings: Mapping[str, Any]) -> int:
+    """Return the effective pending limit with the same bounds for every caller."""
+    from shelfmark.core.request_helpers import coerce_int
+
+    return min(max(coerce_int(settings.get("MAX_PENDING_REQUESTS_PER_USER"), default=20), 1), 1000)
+
+
 def merge_request_policy_settings(
     global_settings: Mapping[str, Any] | None,
     user_settings: Mapping[str, Any] | None = None,

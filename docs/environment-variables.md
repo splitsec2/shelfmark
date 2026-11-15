@@ -302,8 +302,10 @@ Consecutive failed Tor watchdog probes before the container is reset. 2 tolerate
 | `CALIBRE_WEB_URL` | Adds a navigation button to your book library (Calibre-Web Automated, Grimmory, etc). | string | _none_ |
 | `AUDIOBOOK_LIBRARY_URL` | Adds a separate navigation button for your audiobook library (Audiobookshelf, Plex, etc). When both URLs are set, icons are shown instead of text. | string | _none_ |
 | `LIBRARY_CHECK_CALIBRE_ENABLED` | Read the Calibre metadata.db and mark search results you already own, so you do not download a second copy. Read only, nothing is written to the library. | boolean | `false` |
+| `LIBRARY_CHECK_CALIBRE_SHARED` | Let this library satisfy personal Hardcover requests. Enable only if every Shelfmark user can access all items indexed here. | boolean | `false` |
 | `CALIBRE_LIBRARY_DB_PATH` | Path to metadata.db as seen from inside the Shelfmark container. Mount the Calibre library folder read-only, e.g. /path/to/calibre-library:/calibre-library:ro. | string | `/calibre-library/metadata.db` |
 | `LIBRARY_CHECK_AUDIOBOOKSHELF_ENABLED` | Ask your Audiobookshelf server which audiobooks you already own, so synced and automatic downloads skip them. Read only, nothing is written to Audiobookshelf. | boolean | `false` |
+| `LIBRARY_CHECK_AUDIOBOOKSHELF_SHARED` | Let this library satisfy personal Hardcover requests. Enable only if every Shelfmark user can access all items indexed here. | boolean | `false` |
 | `AUDIOBOOKSHELF_URL` | Base URL reachable from the Shelfmark container (not the public URL). Often the host LAN IP, e.g. http://10.0.0.91:13378. | string | _none_ |
 | `AUDIOBOOKSHELF_TOKEN` | API token from Audiobookshelf (Settings > Users > your user > API Token). | string (secret) | _none_ |
 | `AUDIOBOOKSHELF_LIBRARY_IDS` | Comma-separated library IDs to check. Leave blank for all book libraries. | string | _none_ |
@@ -349,6 +351,15 @@ Read the Calibre metadata.db and mark search results you already own, so you do 
 - **Type:** boolean
 - **Default:** `false`
 
+#### `LIBRARY_CHECK_CALIBRE_SHARED`
+
+**Everyone can access this Calibre library**
+
+Let this library satisfy personal Hardcover requests. Enable only if every Shelfmark user can access all items indexed here.
+
+- **Type:** boolean
+- **Default:** `false`
+
 #### `CALIBRE_LIBRARY_DB_PATH`
 
 **Calibre metadata.db path**
@@ -363,6 +374,15 @@ Path to metadata.db as seen from inside the Shelfmark container. Mount the Calib
 **Mark audiobooks already in your Audiobookshelf library**
 
 Ask your Audiobookshelf server which audiobooks you already own, so synced and automatic downloads skip them. Read only, nothing is written to Audiobookshelf.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `LIBRARY_CHECK_AUDIOBOOKSHELF_SHARED`
+
+**Everyone can access this Audiobookshelf library**
+
+Let this library satisfy personal Hardcover requests. Enable only if every Shelfmark user can access all items indexed here.
 
 - **Type:** boolean
 - **Default:** `false`
@@ -1122,7 +1142,7 @@ Custom label for the OIDC sign-in button on the login page.
 | Variable | Description | Type | Default |
 |----------|-------------|------|---------|
 | `HARDCOVER_SYNC_ENABLED` | Periodically sync the selected Hardcover shelves into requests. | boolean | `false` |
-| `HARDCOVER_SYNC_TOKEN` | Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider. Each user can connect their own account instead, in which case their shelf syncs to requests they own and this token is the fallback for everyone else. | string (secret) | _none_ |
+| `HARDCOVER_SYNC_TOKEN` | Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider. The instance sync uses this credential. Users can connect their own accounts in My Account. | string (secret) | _none_ |
 | `HARDCOVER_SYNC_STATUSES` | Which Hardcover reading shelf to pull from. | string (choice) | `1` |
 | `HARDCOVER_SYNC_CONTENT_TYPE` | Content type for synced requests. "Ebooks and audiobooks" creates one request of each per shelf book; every request is checked against its own library and downloaded with its own format guard and source priority. | string (choice) | `audiobook` |
 | `HARDCOVER_SYNC_INTERVAL` | How often the scheduled sync runs (minimum 1 minute). | number | `6` |
@@ -1155,7 +1175,7 @@ Periodically sync the selected Hardcover shelves into requests.
 
 **Hardcover API Token**
 
-Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider. Each user can connect their own account instead, in which case their shelf syncs to requests they own and this token is the fallback for everyone else.
+Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider. The instance sync uses this credential. Users can connect their own accounts in My Account.
 
 - **Type:** string (secret)
 - **Default:** _none_

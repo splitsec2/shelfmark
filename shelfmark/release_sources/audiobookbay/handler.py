@@ -86,7 +86,7 @@ class AudiobookBayHandler(ExternalClientHandler):
             return source_url
 
         # Backward-compat: older tests and some legacy flows used task_id as URL.
-        task_id = (task.task_id or "").strip()
+        task_id = task.release_id.strip()
         if task_id.startswith(("http://", "https://")):
             return task_id
         return None

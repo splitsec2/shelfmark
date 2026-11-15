@@ -76,7 +76,7 @@ class DirectDownloadHandler(DownloadHandler):
 
             # Reconstruct the provider-owned record without resolving it again.
             book_info = BrowseRecord(
-                id=task.task_id,
+                id=task.release_id,
                 title=task.title,
                 source="direct_download",
                 author=task.author,

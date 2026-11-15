@@ -426,9 +426,9 @@ def register_release_routes(
             if policy_mode is not None and policy_mode != PolicyMode.DOWNLOAD:
                 return _policy_block_response(policy_mode)
 
-            release_payload = data
+            release_payload = dict(data)
+            release_payload.pop("_request_id", None)
             if inferred_content_type and data.get("content_type") is None:
-                release_payload = dict(data)
                 release_payload["content_type"] = resolved_content_type
 
             logger.info(

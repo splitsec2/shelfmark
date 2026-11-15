@@ -52,10 +52,18 @@ class _Provider:
         self.enabled = enabled
         self.error = error
         self.token = token
+        self.shared = False
+        self.configuration = "default"
         self.fetches = 0
 
     def is_enabled(self) -> bool:
         return self.enabled
+
+    def is_shared(self) -> bool:
+        return self.shared
+
+    def configuration_key(self) -> object:
+        return self.configuration
 
     def describe(self) -> str:
         return f"{self.display_name} (test)"
@@ -226,7 +234,7 @@ def test_provider_error_keeps_answering_from_the_stale_cache(
     assert library_index.is_in_library(_book(), "ebook") is True
 
     provider.error = RuntimeError("boom")
-    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    clock[0] += library_index.CACHE_TTL_SECONDS + 1
     warnings = _warnings(monkeypatch)
 
     assert library_index.is_in_library(_book(), "ebook") is True
@@ -242,7 +250,7 @@ def test_a_failing_library_is_tried_once_per_search_not_once_per_result(
     assert library_index.is_in_library(_book(), "ebook") is True
 
     provider.error = RuntimeError("boom")
-    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    clock[0] += library_index.CACHE_TTL_SECONDS + 1
     warnings = _warnings(monkeypatch)
 
     for _ in range(40):  # one search page, every result asks
@@ -291,7 +299,7 @@ def test_entries_are_cached_until_the_ttl_expires(
     library_index.is_in_library(_book(), "ebook")
     assert provider.fetches == 1
 
-    clock[0] += library_index._CACHE_TTL_SECONDS - 1
+    clock[0] += library_index.CACHE_TTL_SECONDS - 1
     library_index.is_in_library(_book(), "ebook")
     assert provider.fetches == 1
 
@@ -516,7 +524,7 @@ def test_a_library_that_suddenly_lists_nothing_keeps_answering_from_the_earlier_
     assert library_index.is_in_library(_book(), "audiobook") is True
 
     provider.entries = []  # the server's answer changed shape and every item vanished
-    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    clock[0] += library_index.CACHE_TTL_SECONDS + 1
     warnings = _warnings(monkeypatch)
 
     assert library_index.is_in_library(_book(), "audiobook") is True
@@ -564,7 +572,7 @@ def test_a_strict_check_still_answers_from_a_stale_cache(
     assert library_index.is_in_library(_book(), "ebook", strict=True) is True
 
     provider.error = RuntimeError("boom")
-    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    clock[0] += library_index.CACHE_TTL_SECONDS + 1
 
     assert library_index.is_in_library(_book(), "ebook", strict=True) is True
 
@@ -626,3 +634,21 @@ def test_matching_tokenises_the_title_once_for_all_entries(monkeypatch: pytest.M
 
     assert library_index.match_entries(_book(), entries) is None
     assert len(calls) <= 2
+
+
+def test_shared_ownership_uses_only_the_current_configured_library(providers):
+    calibre = _Provider("calibre", {"ebook"}, [_DCC_ENTRY])
+    providers.append(calibre)
+    book = _book()
+
+    assert library_index.is_in_library(book, "ebook")
+    assert not library_index.is_in_library(book, "ebook", shared_only=True)
+
+    calibre.shared = True
+    assert library_index.is_in_library(book, "ebook", shared_only=True)
+    assert not library_index.is_in_library(book, "audiobook", shared_only=True)
+
+    calibre.configuration = "a different index"
+    calibre.error = OSError("library unavailable")
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(book, "ebook", shared_only=True, strict=True)

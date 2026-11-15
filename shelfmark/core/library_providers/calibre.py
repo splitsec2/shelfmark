@@ -153,21 +153,29 @@ class CalibreLibrary:
     content_types = frozenset({"ebook"})
 
     def __init__(self, overrides: Mapping[str, Any] | None = None) -> None:
-        self._overrides = overrides
+        self._path = _db_path(overrides).absolute()
+        self._enabled = bool(setting(app_config, "LIBRARY_CHECK_CALIBRE_ENABLED", False, overrides))
+        self._shared = bool(setting(app_config, "LIBRARY_CHECK_CALIBRE_SHARED", False, overrides))
 
     def is_enabled(self) -> bool:
-        return bool(setting(app_config, "LIBRARY_CHECK_CALIBRE_ENABLED", False, self._overrides))
+        return self._enabled
+
+    def is_shared(self) -> bool:
+        return self._shared
+
+    def configuration_key(self) -> object:
+        return self._path
 
     def describe(self) -> str:
-        return f"Calibre library at {_db_path(self._overrides)}"
+        return f"Calibre library at {self._path}"
 
     def fingerprint(self) -> float | None:
-        path = _db_path(self._overrides)
+        path = self._path
         candidates = (path, path.with_name(f"{path.name}-wal"))
         return max((p.stat().st_mtime for p in candidates if p.exists()), default=None)
 
     def fetch_entries(self) -> list[LibraryEntry]:
-        path = _db_path(self._overrides)
+        path = self._path
         if not path.is_file():
             raise FileNotFoundError(f"No Calibre database at {path}")
         with closing(_connect(path)) as conn:

@@ -78,9 +78,7 @@ def _admin_ids(user_db: UserDB) -> set[int]:
     }
 
 
-def _sync_all_accounts(
-    user_db: UserDB, *, db_path: str | None, scope: SyncScope = "all"
-) -> dict[str, Any]:
+def _sync_all_accounts(user_db: UserDB, *, scope: SyncScope = "all") -> dict[str, Any]:
     """Sync every connected Hardcover account, then the app-level token.
 
     Each user is synced on their own so a bad token, a rate limit or an API outage on
@@ -108,7 +106,7 @@ def _sync_all_accounts(
 
     for user_id in per_user_ids:
         try:
-            merge(sync_wishlist(user_db, db_path=db_path, user_id=user_id))
+            merge(sync_wishlist(user_db, user_id=user_id))
         except Exception:
             logger.exception("hardcover-sync: sync failed for user %s", user_id)
             totals["errors"] += 1
@@ -119,7 +117,7 @@ def _sync_all_accounts(
     run_app_level = not connected_ids or has_app_level_token()
     if run_app_level:
         try:
-            merge(sync_wishlist(user_db, db_path=db_path))
+            merge(sync_wishlist(user_db))
         except Exception:
             logger.exception("hardcover-sync: app-level sync failed")
             totals["errors"] += 1
@@ -152,7 +150,7 @@ def run_once(*, force: bool = False, scope: SyncScope = "all") -> dict[str, Any]
 
         sync_summary: dict[str, Any] | None = None
         if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
-            sync_summary = _sync_all_accounts(user_db, db_path=db_path, scope=scope)
+            sync_summary = _sync_all_accounts(user_db, scope=scope)
         auto_kwargs: dict[str, Any] = {
             "queue_release": queue_release,
             "db_path": db_path,

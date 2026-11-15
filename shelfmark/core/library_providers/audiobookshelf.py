@@ -8,6 +8,7 @@ folder path.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -170,22 +171,32 @@ class AudiobookshelfLibrary:
     content_types = frozenset({"audiobook"})
 
     def __init__(self, overrides: Mapping[str, Any] | None = None) -> None:
-        self._overrides = overrides
+        self._enabled, self._url, self._token, self._library_ids = _config(overrides)
+        self._shared = bool(
+            setting(app_config, "LIBRARY_CHECK_AUDIOBOOKSHELF_SHARED", False, overrides)
+        )
 
     def is_enabled(self) -> bool:
-        enabled, url, token, _lib_ids = _config(self._overrides)
-        return enabled and bool(url) and bool(token)
+        return self._enabled and bool(self._url) and bool(self._token)
+
+    def is_shared(self) -> bool:
+        return self._shared
+
+    def configuration_key(self) -> object:
+        return (
+            self._url,
+            hashlib.sha256(self._token.encode()).hexdigest(),
+            frozenset(self._library_ids),
+        )
 
     def describe(self) -> str:
-        _enabled, url, _token, _lib_ids = _config(self._overrides)
-        return f"Audiobookshelf at {url}" if url else "Audiobookshelf"
+        return f"Audiobookshelf at {self._url}" if self._url else "Audiobookshelf"
 
     def fingerprint(self) -> None:
         return None
 
     def fetch_entries(self) -> list[LibraryEntry]:
-        _enabled, url, token, lib_ids = _config(self._overrides)
-        if not url or not token:
+        if not self._url or not self._token:
             msg = "Set the Audiobookshelf URL and token first."
             raise ValueError(msg)
-        return _fetch_library_entries(url, token, lib_ids)
+        return _fetch_library_entries(self._url, self._token, self._library_ids)

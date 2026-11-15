@@ -79,8 +79,8 @@ class IRCDownloadHandler(DownloadHandler):
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
     ) -> str | None:
-        """Download a release via IRC DCC. task.task_id contains the IRC request string."""
-        download_request = task.task_id
+        """Download a release via IRC DCC. the release ID contains the IRC request string."""
+        download_request = task.release_id
         logger.info("IRC download: %s...", download_request[:60])
         if has_control_characters(download_request):
             logger.warning("IRC download refused: request line contains control characters")

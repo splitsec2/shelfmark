@@ -114,7 +114,7 @@ class TestHardcoverLists:
 
         monkeypatch.setattr(provider, "_resolve_current_user_id", lambda: "123")
 
-        def fake_execute(query: str, variables):
+        def fake_execute(query: str, variables, *, raise_on_error=False):
             captured["query"] = query
             captured["variables"] = variables
             return {
@@ -293,12 +293,10 @@ class TestHardcoverLists:
             "userBookId": 77,
             "statusId": 1,
         }
-        assert cache_stub.invalidated == [
-            cache_key("hardcover:user_lists", "user-123"),
-        ]
         assert set(cache_stub.invalidated_prefixes) == {
-            cache_key("hardcover:user_books:status", "user-123", 2),
-            cache_key("hardcover:user_books:status", "user-123", 1),
+            cache_key("hardcover:user_lists", "user-123") + ":",
+            cache_key("hardcover:user_books:status", "user-123", 2) + ":",
+            cache_key("hardcover:user_books:status", "user-123", 1) + ":",
         }
 
     def test_set_book_target_state_removes_list_membership(self, monkeypatch):
@@ -343,11 +341,9 @@ class TestHardcoverLists:
         result = provider.set_book_target_state("123", "id:42", selected=False)
 
         assert result == {"changed": True}
-        assert cache_stub.invalidated == [
-            cache_key("hardcover:user_lists", "user-123"),
-        ]
         assert cache_stub.invalidated_prefixes == [
-            cache_key("hardcover:list:id", 42),
+            cache_key("hardcover:user_lists", "user-123") + ":",
+            cache_key("hardcover:list:id", 42) + ":",
         ]
 
     def test_set_book_target_state_rejects_non_writable_targets(self, monkeypatch):

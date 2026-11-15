@@ -823,7 +823,7 @@ def test_an_admin_save_of_a_secret_that_is_not_a_string_is_refused():
 def test_users_me_edit_context_masks_secret_settings(app, user_db, monkeypatch):
     from shelfmark.core.user_settings_overrides import SECRET_PLACEHOLDER
 
-    monkeypatch.delenv("HARDCOVER_SYNC_TOKEN", raising=False)
+    monkeypatch.setenv("HARDCOVER_SYNC_TOKEN", "instance-token-value")
     user = user_db.create_user(username="alice")
     user_db.set_user_settings(user["id"], {"HARDCOVER_SYNC_TOKEN": "alice-token-value"})
     client = _authed_client_for_user(app, user)
@@ -838,6 +838,7 @@ def test_users_me_edit_context_masks_secret_settings(app, user_db, monkeypatch):
     assert resp.status_code == 200
     assert resp.json["user"]["settings"]["HARDCOVER_SYNC_TOKEN"] == SECRET_PLACEHOLDER
     hardcover = resp.json["hardcoverPreferences"]
+    assert hardcover["fields"][0]["fromEnv"] is False
     assert hardcover["userOverrides"]["HARDCOVER_SYNC_TOKEN"] == SECRET_PLACEHOLDER
     assert hardcover["globalValues"]["HARDCOVER_SYNC_TOKEN"] is None
     assert hardcover["effective"]["HARDCOVER_SYNC_TOKEN"] == {
@@ -879,7 +880,8 @@ def test_users_me_update_keeps_the_stored_secret_when_the_placeholder_comes_back
     assert "alice-token-value" not in resp.get_data(as_text=True)
 
 
-def test_users_me_update_stores_a_new_secret_and_clears_it_on_null(app, user_db):
+def test_users_me_update_stores_a_new_secret_and_clears_it_on_null(app, user_db, monkeypatch):
+    monkeypatch.setenv("HARDCOVER_SYNC_TOKEN", "instance-token-value")
     user = user_db.create_user(username="alice")
     client = _authed_client_for_user(app, user)
 
@@ -896,6 +898,9 @@ def test_users_me_update_stores_a_new_secret_and_clears_it_on_null(app, user_db)
                 "new-token-value"
             )
             assert "new-token-value" not in saved.get_data(as_text=True)
+
+            revealed = client.get("/api/users/me/secrets/HARDCOVER_SYNC_TOKEN")
+            assert revealed.json["value"] == "new-token-value"
 
             cleared = client.put("/api/users/me", json={"settings": {"HARDCOVER_SYNC_TOKEN": None}})
 

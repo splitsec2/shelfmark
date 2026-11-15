@@ -440,6 +440,16 @@ def general_settings() -> list[SettingsField]:
             ),
             default=False,
         ),
+        CheckboxField(
+            key="LIBRARY_CHECK_CALIBRE_SHARED",
+            label="Everyone can access this Calibre library",
+            description=(
+                "Let this library satisfy personal Hardcover requests. Enable only if every "
+                "Shelfmark user can access all items indexed here."
+            ),
+            default=False,
+            show_when={"field": "LIBRARY_CHECK_CALIBRE_ENABLED", "value": True},
+        ),
         TextField(
             key="CALIBRE_LIBRARY_DB_PATH",
             label="Calibre metadata.db path",
@@ -464,6 +474,16 @@ def general_settings() -> list[SettingsField]:
                 "and automatic downloads skip them. Read only, nothing is written to Audiobookshelf."
             ),
             default=False,
+        ),
+        CheckboxField(
+            key="LIBRARY_CHECK_AUDIOBOOKSHELF_SHARED",
+            label="Everyone can access this Audiobookshelf library",
+            description=(
+                "Let this library satisfy personal Hardcover requests. Enable only if every "
+                "Shelfmark user can access all items indexed here."
+            ),
+            default=False,
+            show_when={"field": "LIBRARY_CHECK_AUDIOBOOKSHELF_ENABLED", "value": True},
         ),
         TextField(
             key="AUDIOBOOKSHELF_URL",

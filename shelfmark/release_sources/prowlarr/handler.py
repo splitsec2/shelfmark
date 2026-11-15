@@ -253,7 +253,7 @@ class ProwlarrHandler(ExternalClientHandler):
     ) -> DownloadRequest | None:
         """Resolve Prowlarr cache entry into download request parameters."""
         # Look up the cached release
-        prowlarr_result = get_release(task.task_id)
+        prowlarr_result = get_release(task.release_id)
         if not prowlarr_result:
             logger.info("Prowlarr release cache miss, refreshing: %s", task.task_id)
             prowlarr_result = self._refresh_release(task)
@@ -332,7 +332,7 @@ class ProwlarrHandler(ExternalClientHandler):
         indexer = normalize_optional_text(context.get("indexer"))
         book = BookMetadata(
             provider="shelfmark",
-            provider_id=task.task_id,
+            provider_id=task.release_id,
             title=title,
             authors=[task.author] if task.author else [],
             search_title=title,
@@ -351,10 +351,10 @@ class ProwlarrHandler(ExternalClientHandler):
             raw_release = get_release(release.source_id)
             if raw_release is None:
                 continue
-            if not self._raw_release_matches_task(raw_release, task.task_id):
+            if not self._raw_release_matches_task(raw_release, task.release_id):
                 continue
 
-            cache_release(task.task_id, raw_release)
+            cache_release(task.release_id, raw_release)
             logger.info("Refreshed Prowlarr release: %s", task.task_id)
             return raw_release
 
@@ -401,7 +401,7 @@ class ProwlarrHandler(ExternalClientHandler):
             return None
 
         logger.info("Refreshing stale Prowlarr torrent URL for %s", task.task_id)
-        remove_release(task.task_id)
+        remove_release(task.release_id)
         refreshed_request = self._resolve_download(task, status_callback)
         if refreshed_request is None:
             raise RuntimeError(EXPIRED_LINK_REFRESH_ERROR) from error
@@ -409,7 +409,7 @@ class ProwlarrHandler(ExternalClientHandler):
 
     def _on_download_complete(self, task: DownloadTask) -> None:
         """Remove completed release from the Prowlarr cache."""
-        remove_release(task.task_id)
+        remove_release(task.release_id)
 
     def cancel(self, task_id: str) -> bool:
         """Cancel download and clean up cache. Primary cancellation is via cancel_flag."""

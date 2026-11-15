@@ -625,7 +625,7 @@ class TestAutoDownloadRequest:
         _stub_provider(monkeypatch, _book())
         monkeypatch.setattr(auto_download, "app_config", _Config())
 
-        def _is_in_library(_book, _content_type=None, *, strict=False):
+        def _is_in_library(_book, _content_type=None, *, strict=False, shared_only=False):
             if strict:
                 raise library_index.LibraryUnavailableError("Audiobookshelf is unavailable")
             return False  # what a fail-open check would have answered
@@ -3341,7 +3341,7 @@ class TestSharedDeadReleases:
 class TestFailedReleaseIsTriedAgain:
     """A failed release is kept out for a number of days, then given another chance."""
 
-    def _history(self, user_db, task_id, status, message, *, source="audiobookbay"):
+    def _history(self, user_db, task_id, status, message, *, source="audiobookbay", source_id=None):
         service = DownloadHistoryService(user_db._db_path)
         service.record_download(
             task_id=task_id,
@@ -3358,7 +3358,7 @@ class TestFailedReleaseIsTriedAgain:
             content_type="audiobook",
             downloads=None,
             origin="requested",
-            retry_payload=None,
+            retry_payload={"source_id": source_id} if source_id else None,
         )
         service.finalize_download(task_id=task_id, final_status=status, status_message=message)
 
@@ -3381,6 +3381,14 @@ class TestFailedReleaseIsTriedAgain:
         self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
         self._history(user_db, "abc", "complete", "Complete")
 
+        assert self._recent(user_db) == frozenset()
+
+    def test_the_latest_attempt_counts_even_when_another_user_downloaded_it(self, user_db):
+        self._history(user_db, "attempt-one", "complete", "Complete", source_id="shared")
+        self._history(user_db, "attempt-two", "error", "Download failed", source_id="shared")
+        assert self._recent(user_db) == {("audiobookbay", "shared")}
+
+        self._history(user_db, "attempt-three", "complete", "Complete", source_id="shared")
         assert self._recent(user_db) == frozenset()
 
     @pytest.mark.parametrize("message", ["Interrupted", "Superseded by a completed download"])
@@ -3786,3 +3794,130 @@ class TestOwnerPolicyGate:
         )
         expected = "pending" if reopened else "fulfilled"
         assert user_db.get_request(row["id"])["status"] == expected
+
+
+@pytest.mark.parametrize(
+    ("shared", "first_status", "indexed", "expected"),
+    [
+        (True, "queued", False, "skipped"),
+        (True, "complete", False, "skipped"),
+        (True, "complete", True, "in_library"),
+        (True, "old_complete", False, "queued"),
+        (True, "error", False, "queued"),
+        (False, "queued", False, "queued"),
+        (False, "complete", False, "queued"),
+    ],
+)
+def test_two_owners_keep_separate_requests_and_delivery_history(
+    user_db, monkeypatch, shared, first_status, indexed, expected
+):
+    from shelfmark.core.download_recording import register_download_recording
+    from shelfmark.core.hardcover_sync import PERSONAL_SYNC_ORIGIN
+    from shelfmark.core.models import QueueStatus
+    from shelfmark.core.queue import BookQueue
+    from shelfmark.download import orchestrator
+
+    queue = BookQueue()
+    history = DownloadHistoryService(user_db.db_path)
+    monkeypatch.setattr(orchestrator, "book_queue", queue)
+    monkeypatch.setattr("shelfmark.core.queue.book_queue", queue)
+    monkeypatch.setattr(orchestrator, "_source_unavailable_message", lambda _source: None)
+    monkeypatch.setattr(orchestrator, "ws_manager", None)
+    monkeypatch.setattr(
+        "shelfmark.core.download_recording._notify_admin_for_terminal_download_status",
+        lambda **_kwargs: None,
+    )
+    register_download_recording(
+        get_user_db=lambda: user_db,
+        get_download_history_service=lambda: history,
+        get_activity_view_state_service=lambda: None,
+        emit_request_update_events=lambda _rows: None,
+        ws_manager=None,
+    )
+    monkeypatch.setattr(library_index, "has_shared_library", lambda _content_type: shared)
+    monkeypatch.setattr(library_index, "is_in_library", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        auto_download,
+        "search_source_releases",
+        lambda *_a, **_k: (None, [_release()], None),
+    )
+    _stub_provider(monkeypatch, _book())
+    reviewer = user_db.create_user(username="reviewer", role="admin")
+    alice = user_db.create_user(username="alice")
+    bob = user_db.create_user(username="bob", role="admin" if shared else "user")
+    first = _pending_request(user_db, alice["id"])
+
+    def run(row):
+        return auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["prowlarr"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=orchestrator.queue_release,
+            admin_user_id=reviewer["id"],
+        )
+
+    # One variant has both requests pending before acquisition starts.
+    second = (
+        _pending_request(user_db, bob["id"], sync_origin=PERSONAL_SYNC_ORIGIN)
+        if first_status == "queued" and shared
+        else None
+    )
+    assert run(first).status == "queued"
+    (first_task_id,) = queue.get_status(user_id=alice["id"])[QueueStatus.QUEUED]
+    if first_status == "old_complete":
+        queue.update_status(first_task_id, QueueStatus.COMPLETE)
+        with sqlite3.connect(user_db.db_path) as conn:
+            conn.execute(
+                "UPDATE download_history SET terminal_at = ? WHERE task_id = ?",
+                (
+                    (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                    first_task_id,
+                ),
+            )
+    elif first_status != "queued":
+        queue.update_status(first_task_id, QueueStatus(first_status))
+
+    if second is None:
+        overrides = {"sync_origin": PERSONAL_SYNC_ORIGIN} if shared else {}
+        second = _pending_request(user_db, bob["id"], **overrides)
+
+    def available(_book, content_type, *, strict, shared_only):
+        assert content_type == "audiobook"
+        assert strict and shared_only
+        return indexed
+
+    monkeypatch.setattr(library_index, "is_in_library", available)
+    assert run(second).status == expected
+    second_row = user_db.get_request(second["id"])
+
+    first_history = history.get_by_task_id(first_task_id)
+    assert first_history["request_id"] == first["id"]
+    assert first_history["user_id"] == alice["id"]
+    if expected == "queued":
+        (second_task_id,) = queue.get_status(user_id=bob["id"])[QueueStatus.QUEUED]
+        assert first_task_id != second_task_id
+        assert queue.get_task(second_task_id).release_id == "rel-1"
+        assert [row["task_id"] for row in history.list_recent(user_id=bob["id"])] == [
+            second_task_id
+        ]
+        assert [row["task_id"] for row in history.list_recent(user_id=alice["id"])] == [
+            first_task_id
+        ]
+        persisted = history.get_by_task_id(second_task_id)["retry_payload"]
+        restored = orchestrator._restore_task_from_retry_payload(persisted)
+        assert restored.task_id == second_task_id
+        assert restored.release_id == "rel-1"
+        assert restored.request_id == second["id"]
+        assert restored.user_id == bob["id"]
+        legacy = orchestrator._restore_task_from_retry_payload(
+            {"task_id": "old-release", "source": "prowlarr", "title": "Old release"}
+        )
+        assert legacy.task_id == legacy.release_id == "old-release"
+    elif expected == "in_library":
+        assert second_row["delivery_state"] == QueueStatus.COMPLETE
+        assert history.list_recent(user_id=bob["id"]) == []
+    else:
+        assert second_row["status"] == "pending"
+        assert history.list_recent(user_id=bob["id"]) == []

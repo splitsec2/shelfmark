@@ -290,10 +290,8 @@ class DownloadHistoryService:
         On retry (row already exists): resets the row back to 'active'
         so the normal finalize path works when the retry completes.
 
-        A task id comes from the release, so a second request that chooses the same release
-        reuses the row. It then takes the row over: the request, requester and what the card
-        shows follow the new download, instead of the new download appearing under the
-        request that first used the release (with that request's notes and state).
+        New request-backed tasks have request-scoped IDs. Legacy retries may
+        still reuse a row originally keyed by its release ID.
         """
         normalized_task_id = _normalize_task_id(task_id)
         normalized_user_id = normalize_optional_positive_int(user_id, "user_id")

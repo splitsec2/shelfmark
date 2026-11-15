@@ -162,6 +162,9 @@ def test_concurrent_download_loop_recovers_and_processes_task_after_transient_lo
                 raise _StopCoordinator()
             return None
 
+        def get_task(self, task_id: str) -> DownloadTask:
+            return DownloadTask(task_id=task_id, source="prowlarr", title="Book")
+
         # These raise _UnexpectedCall rather than AssertionError because the coordinator
         # loop catches Exception: an AssertionError here would be swallowed and logged,
         # letting the test pass vacuously instead of reporting the unexpected call.
@@ -422,3 +425,50 @@ def test_a_task_waiting_in_its_clients_queue_does_not_use_up_its_source(monkeypa
     # "waiting" is first and takes the one slot; being queued in qBittorrent it gives it back,
     # so "next" starts; "next" is working, so "third" has to wait.
     assert pool.started == ["waiting", "next"]
+
+
+def test_coordinator_serializes_the_same_release_until_its_worker_finishes(monkeypatch):
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+
+    from shelfmark.core.queue import BookQueue
+    from shelfmark.download import orchestrator
+
+    queue = BookQueue()
+    for task_id, source_id in (("alice", "shared"), ("bob", "shared"), ("other", "different")):
+        assert queue.add(
+            DownloadTask(task_id=task_id, source="prowlarr", title="Book", source_id=source_id)
+        )
+
+    submitted = []
+    futures = {}
+
+    class Executor(_FakeExecutor):
+        def submit(self, _worker, task_id, _cancel_flag):
+            submitted.append(task_id)
+            futures[task_id] = Future()
+            return futures[task_id]
+
+    def sleep(delay):
+        if delay != 0.5:
+            return
+        if "bob" in submitted:
+            raise _StopLoop()
+        assert submitted == ["alice", "other"]
+        futures["alice"].set_result(None)
+
+    monkeypatch.setattr(orchestrator, "book_queue", queue)
+    monkeypatch.setattr(orchestrator, "ThreadPoolExecutor", Executor)
+    monkeypatch.setattr(orchestrator, "time", SimpleNamespace(time=lambda: 0.0, sleep=sleep))
+    monkeypatch.setattr(orchestrator, "_find_stalled_tasks", lambda *_args: [])
+    monkeypatch.setattr(orchestrator, "_per_source_limit", lambda: 0)
+    monkeypatch.setattr(
+        orchestrator,
+        "config",
+        SimpleNamespace(MAX_CONCURRENT_DOWNLOADS=2, MAIN_LOOP_SLEEP_TIME=0.5),
+    )
+
+    with pytest.raises(_StopLoop):
+        orchestrator.concurrent_download_loop()
+
+    assert submitted == ["alice", "other", "bob"]
