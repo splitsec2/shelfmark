@@ -179,10 +179,7 @@ class TestOwnAccount:
     """A user who connected their own Hardcover account uses it for lists and shelves."""
 
     def _own(self, main_module, client, provider, *, is_admin: bool, token="hc_pat_own"):
-        with client.session_transaction() as sess:
-            sess["user_id"] = "someone"
-            sess["is_admin"] = is_admin
-            sess["db_user_id"] = 7
+        _session(client, is_admin=is_admin)
         created: list[dict] = []
 
         def _get_provider(name, **kwargs):
